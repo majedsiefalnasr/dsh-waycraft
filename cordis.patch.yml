@@ -7,3 +7,6 @@
     - id: waycraft-skills
       name: 'dsh-waycraft/skills'
       disabled: true
+    - id: waycraft-mcp
+      name: 'dsh-waycraft/mcp'
+      disabled: true

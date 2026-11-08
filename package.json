@@ -28,7 +28,10 @@
     "./subscriptions/locale/*.json": "./subscriptions/locale/*.json",
     "./subscriptions/icon": "./icon.svg",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg"
+    "./icon": "./icon.svg",
+    "./mcp": "./dist/mcp.js",
+    "./mcp/locale/*.json": "./mcp/locale/*.json",
+    "./mcp/icon": "./icon.svg"
   },
   "files": [
     "index.js",
@@ -47,7 +50,8 @@
     "src/PROVENANCE.md",
     "subscriptions/locale/*.json",
     "skills/locale/*.json",
-    "skills/LICENSE-APACHE-2.0"
+    "skills/LICENSE-APACHE-2.0",
+    "mcp/locale/*.json"
   ],
   "dsh": {
     "bundle": {
