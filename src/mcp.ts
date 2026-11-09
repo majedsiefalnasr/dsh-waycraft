@@ -6,6 +6,7 @@
  * #165: safe persistent CRUD for MCP server entries in DSH cordis.patch.yml
  * (atomic replace, optimistic concurrency, unknown-field preservation).
  * #168: explicit connection testing/status reporting (trust-gated).
+ * #169: read-only tool enumeration/cache with freshness (explicit only, no eager connections).
  */
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +14,7 @@ import { McpCordisConfigStore } from './mcp-config-store.js';
 import { testMcpConnection } from './mcp-connection-test.js';
 import { sanitizeMcpObservable } from './mcp-credentials.js';
 import { assertTrustApprovedForAction } from './mcp-trust.js';
+import { McpToolCacheStore, resolveMcpToolCachePath, searchMcpTools } from './mcp-tool-cache.js';
 
 export const name = 'dsh-waycraft/mcp';
 export const inject = ['connection'] as const;
@@ -73,7 +75,9 @@ export function apply(ctx: any, _config: Config = {}): void {
   ctx.inject?.(['connection'], (target: any) => {
     const connection = target.get?.('connection');
     if (!connection?.fetch?.register) return;
-    const store = new McpCordisConfigStore({ configPath: resolveCordisPatchPath() });
+    const configPath = resolveCordisPatchPath();
+    const store = new McpCordisConfigStore({ configPath });
+    const toolCache = new McpToolCacheStore(resolveMcpToolCachePath({ configPath }));
     const dispose = connection.fetch.register({
       path: MCP_ROUTE,
       methods: ['POST'],
@@ -102,13 +106,54 @@ export function apply(ctx: any, _config: Config = {}): void {
           return json({ ok: true, component: 'mcp', authorized: true, version: 1 });
         }
         if (action === 'list') {
+          // #169: read-only listing. Never probes/enumerates tools.
           const result = await store.list();
           if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to list MCP servers', { code: result.code, fingerprint: result.fingerprint });
           return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers });
         }
+        if (action === 'list_tools') {
+          // #169: read-only cached enumeration. No eager connections.
+          const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
+          const query = typeof body.query === 'string' ? body.query : undefined;
+          if (typeof serverName === 'string' && serverName) {
+            const trust = await store.trustStatus(serverName);
+            if (!trust.ok || !trust.server) return reject(mapPersistenceStatus(trust.code), trust.message || 'Server not found', { code: trust.code, fingerprint: trust.fingerprint });
+            const entry = await toolCache.get(serverName, (trust.server as any).config);
+            const tools = searchMcpTools(entry.tools || [], query);
+            return json({ ok: true, fingerprint: trust.fingerprint, serverName, cache: sanitizeMcpObservable({ ...entry, tools }), query: query || undefined });
+          }
+          const result = await store.list();
+          if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to list MCP servers', { code: result.code, fingerprint: result.fingerprint });
+          const configsByName = Object.fromEntries((result.servers || []).map((s: any) => [s.serverName, s.config]));
+          const cache = await toolCache.list(configsByName);
+          const filtered = query ? Object.fromEntries(Object.entries(cache).map(([k, v]) => [k, sanitizeMcpObservable({ ...v, tools: searchMcpTools(v.tools || [], query) })])) : cache;
+          return json({ ok: true, fingerprint: result.fingerprint, cache: filtered, query: query || undefined });
+        }
+        if (action === 'refresh_tools' || action === 'enumerate_tools') {
+          // #169: explicit on-demand enumeration only. Trust-gated. Never eager on import/list.
+          const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
+          if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
+          const trust = await store.trustStatus(serverName);
+          if (!trust.ok || !trust.server) return reject(mapPersistenceStatus(trust.code), trust.message || 'Failed to get trust status', { code: trust.code, fingerprint: trust.fingerprint });
+          try { assertTrustApprovedForAction((trust.server as any).trust, 'refresh_tools'); } catch (err: any) {
+            return reject(403, err.message, { code: err.code || 'trust_required', trust: err.trust, fingerprint: trust.fingerprint });
+          }
+          const server = trust.server as any;
+          const probe = await testMcpConnection(serverName, server.config, {
+            ctx,
+            timeoutMs: typeof body.timeoutMs === 'number' ? body.timeoutMs : undefined,
+            maxPages: typeof body.maxPages === 'number' ? body.maxPages : undefined,
+            maxToolNames: typeof body.maxToolNames === 'number' ? body.maxToolNames : undefined,
+          });
+          const cacheEntry = await toolCache.updateFromProbe(serverName, server.config, { ok: probe.ok, message: probe.message, tools: (probe as any).tools, toolNames: probe.toolNames, truncated: probe.truncated, capability: probe.capability });
+          const query = typeof body.query === 'string' ? body.query : undefined;
+          const tools = searchMcpTools(cacheEntry.tools || [], query);
+          return json({ ok: probe.ok, fingerprint: trust.fingerprint, server: sanitizeMcpObservable(server), probe: sanitizeMcpObservable(probe), cache: sanitizeMcpObservable({ ...cacheEntry, tools }), query: query || undefined }, probe.ok ? 200 : 502);
+        }
         if (action === 'create') {
           const result = await store.create(body.config ?? body.server ?? body, expectedFingerprint);
           if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to create MCP server', { code: result.code, issues: result.issues, fingerprint: result.fingerprint });
+          if (result.server?.serverName) await toolCache.invalidate(result.server.serverName, 'config_changed');
           return json({ ok: true, fingerprint: result.fingerprint, server: result.server, servers: result.servers });
         }
         if (action === 'update') {
@@ -116,6 +161,8 @@ export function apply(ctx: any, _config: Config = {}): void {
           if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
           const result = await store.update(serverName, body.patch ?? body.config ?? {}, expectedFingerprint);
           if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to update MCP server', { code: result.code, issues: result.issues, fingerprint: result.fingerprint });
+          // #169: config/scope/policy changes invalidate enumeration cache.
+          await toolCache.invalidate(serverName, 'config_scope_or_policy_changed');
           return json({ ok: true, fingerprint: result.fingerprint, server: result.server, servers: result.servers });
         }
         if (action === 'remove' || action === 'delete') {
@@ -123,6 +170,7 @@ export function apply(ctx: any, _config: Config = {}): void {
           if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
           const result = await store.remove(serverName, expectedFingerprint);
           if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to remove MCP server', { code: result.code, fingerprint: result.fingerprint });
+          await toolCache.remove(serverName);
           return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers });
         }
         if (action === 'trust_status') {
@@ -134,15 +182,18 @@ export function apply(ctx: any, _config: Config = {}): void {
         }
         if (action === 'approve_trust') {
           // #167: explicit Owner trust approval binds to reviewed configuration fingerprint.
+          // #169: policy/trust activation changes invalidate cached enumeration.
           const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
           if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
           const result = await store.approveTrust(serverName, expectedFingerprint);
           if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to approve trust', { code: result.code, fingerprint: result.fingerprint });
+          await toolCache.invalidate(serverName, 'policy_change');
           return json({ ok: true, fingerprint: result.fingerprint, server: result.server, servers: result.servers });
         }
         if (action === 'test_connection') {
           // #167/#168: explicit connection testing cannot bypass required trust approval.
           // No auto-test on import/create (action is explicit only).
+          // #169: explicit test refreshes enumeration cache on success/failure.
           const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
           if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
           const trust = await store.trustStatus(serverName);
@@ -157,8 +208,9 @@ export function apply(ctx: any, _config: Config = {}): void {
             maxPages: typeof body.maxPages === 'number' ? body.maxPages : undefined,
             maxToolNames: typeof body.maxToolNames === 'number' ? body.maxToolNames : undefined,
           });
+          const cacheEntry = await toolCache.updateFromProbe(serverName, server.config, { ok: test.ok, message: test.message, tools: (test as any).tools, toolNames: test.toolNames, truncated: test.truncated, capability: test.capability });
           // Return actionable success/failure; never expose raw secrets.
-          return json({ ok: test.ok, fingerprint: trust.fingerprint, server: sanitizeMcpObservable(server), test: sanitizeMcpObservable(test) }, test.ok ? 200 : 502);
+          return json({ ok: test.ok, fingerprint: trust.fingerprint, server: sanitizeMcpObservable(server), test: sanitizeMcpObservable(test), toolCache: sanitizeMcpObservable(cacheEntry) }, test.ok ? 200 : 502);
         }
         return reject(400, 'Unknown action');
       },
