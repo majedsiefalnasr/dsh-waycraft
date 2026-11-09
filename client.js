@@ -4503,6 +4503,11 @@ ${R} :is(input[type="text"], input[type="number"], input[type="email"], input[ty
         } catch (error) {
           console.error('dsh-waycraft: Skill manager setup failed', error);
         }
+        try {
+          subscriptions.applyMcp(ctx);
+        } catch (error) {
+          console.error('dsh-waycraft: MCP manager setup failed', error);
+        }
         // Optional component setup must never interrupt the core registrations above.
         try {
           Promise.resolve(subscriptions.applySubscriptions(ctx)).catch(
