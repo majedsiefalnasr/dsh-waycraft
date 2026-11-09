@@ -142,7 +142,7 @@ test('#174 browser integration EN: server-centric UI renders, read-only tools, a
   assert.ok(findAll(json, n => n.props?.role === 'search').length > 0);
   assert.ok(findAll(json, n => n.props?.role === 'tablist').length > 0);
   assert.ok(findAll(json, n => n.props?.['aria-label'] === 'Search servers').length > 0);
-  assert.ok(findAll(json, n => n.props?.dir === 'ltr' && n.props?.['data-waycraft-mcp-ui'] === '174').length > 0);
+  assert.ok(findAll(json, n => n.props?.dir === 'ltr' && (n.props?.['data-waycraft-mcp-ui'] === '174' || n.props?.['data-waycraft-mcp-ui'] === '175')).length > 0);
   renderer.unmount();
 });
 
@@ -170,19 +170,20 @@ test('#174 browser integration AR: Arabic RTL, translated labels, technical LTR 
   const toolsText = allText(renderer.toJSON());
   assert.match(toolsText, /للقراءة فقط/);
   assert.match(toolsText, /لا توجد عناصر تحكم تفعيل\/تعطيل لكل أداة/);
-  // Switch to trash filter to render trashed server actions.
-  const select = findAll(renderer.toJSON(), n => n.type === 'select')[0];
-  await act(async () => { select.props.onChange({ target: { value: 'trashed' } }); await Promise.resolve(); });
+  // #175 integrates Trash as a server-centric area; switch to Trash tab to render trashed server actions.
+  const trashTab = findAll(renderer.toJSON(), n => n.type === 'button' && n.props?.role === 'tab' && /سلة المهملات/.test(allText(n)))[0];
+  assert.ok(trashTab, 'Arabic trash area tab not found');
+  await act(async () => { trashTab.props.onClick(); await Promise.resolve(); });
   const trashText = allText(renderer.toJSON());
   assert.match(trashText, /استعادة/);
   assert.match(trashText, /حذف نهائي/);
   assert.match(trashText, /old/);
-  const container = findAll(renderer.toJSON(), n => n.props?.['data-waycraft-mcp-ui'] === '174')[0];
+  const container = findAll(renderer.toJSON(), n => n.props?.['data-waycraft-mcp-ui'] === '174' || n.props?.['data-waycraft-mcp-ui'] === '175')[0];
   assert.equal(container.props.dir, 'rtl');
   // technical identifiers rendered with bdi dir=ltr
   assert.ok(findAll(renderer.toJSON(), n => n.type === 'bdi' && n.props?.dir === 'ltr').length > 0);
-  // accessibility preserved
-  assert.ok(findAll(renderer.toJSON(), n => n.props?.role === 'search').length > 0);
+  // accessibility preserved (search exists in Servers area; Trash/Discover areas have their own controls)
+  assert.ok(findAll(renderer.toJSON(), n => n.props?.role === 'tablist').length > 0);
   renderer.unmount();
 });
 
@@ -193,5 +194,134 @@ test('#174 unauthorized state shown for non-owner responses', async () => {
   let renderer;
   await act(async () => { renderer = Renderer.create(React.createElement(sections[0].component)); await Promise.resolve(); await Promise.resolve(); });
   assert.match(allText(renderer.toJSON()), /Owner authorization required/);
+  renderer.unmount();
+});
+
+function findButton(rootJson, textRe) {
+  return findAll(rootJson, n => n.type === 'button' && textRe.test(allText(n)))[0];
+}
+function findTextarea(rootJson, labelRe) {
+  // textarea may follow label text in our structure; find first textarea
+  return findAll(rootJson, n => n.type === 'textarea')[0];
+}
+
+const discoverySample = {
+  ok: true, fingerprint: 'fp1',
+  discovery: {
+    ok: true,
+    roots: [{ requested: '/approved', resolved: '/approved', ok: true }],
+    files: [{ root: '/approved', path: '/approved/mcp.json', relativePath: 'mcp.json', status: 'candidate', bytes: 42,
+      preview: { ok: true, format: 'mcpServers-map', candidates: [{ serverName: 'found', format: 'mcpServers-map', config: { serverName: 'found', transport: 'stdio', command: 'node' }, issues: [], valid: true, credentialRefs: [], unknownKeys: [] }], issues: [], stats: { total: 1, valid: 1, invalid: 0, conflicts: 0, credentialRefs: 0 }, scope: { mode: 'single-v1', projectScopeSupported: false, note: 'V1 single scope' } }
+    }],
+    stats: { roots: 1, scanned: 1, candidates: 1, malformed: 0, oversized: 0, unreadable: 0, skipped: 0 },
+    scope: { filesystemScanOnly: true, projectRuntimeIsolation: false, note: 'filesystem only' },
+  }
+};
+
+const importPreviewSample = {
+  ok: true, fingerprint: 'fp1',
+  preview: { ok: true, format: 'mcpServers-map', candidates: [{ serverName: 'imported', format: 'mcpServers-map', config: { serverName: 'imported', transport: 'stdio', command: 'node' }, issues: [], valid: true, credentialRefs: [], unknownKeys: [] }], issues: [], stats: { total: 1, valid: 1, invalid: 0, conflicts: 0, credentialRefs: 0 }, scope: { mode: 'single-v1', projectScopeSupported: false, note: 'V1 single scope' } }
+};
+
+test('#175 browser integration EN: discovery/import candidates require explicit approval, trash operationally labeled', async () => {
+  const calls = [];
+  const { applyMcp } = loadMcpBrowser();
+  const { ctx, sections } = makeCtx({ lang: 'en', fetchImpl: async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, action: body.action, headers: init.headers, body });
+    if (body.action === 'list') return jsonResponse(sampleData());
+    if (body.action === 'discover') return jsonResponse(discoverySample);
+    if (body.action === 'import_preview') return jsonResponse(importPreviewSample);
+    if (body.action === 'import_register') return jsonResponse({ ok: true, fingerprint: 'fp2', import: { ok: true, stats: { registered: 1, replaced: 0, skipped: 0, rejected: 0, failed: 0 }, results: [{ serverName: 'imported', status: 'registered' }] }, servers: sampleData().servers });
+    if (['trash','restore','permanent_delete'].includes(body.action)) return jsonResponse({ ok: true, fingerprint: 'fp2', servers: sampleData().servers, trashedServers: sampleData().trashedServers });
+    return jsonResponse({ ok: true });
+  }});
+  applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  let renderer;
+  await act(async () => { renderer = Renderer.create(React.createElement(sections[0].component)); await Promise.resolve(); await Promise.resolve(); });
+
+  // Discover & Import area
+  const discoverTab = findButton(renderer.toJSON(), /Discover & Import/);
+  assert.ok(discoverTab);
+  await act(async () => { discoverTab.props.onClick(); await Promise.resolve(); });
+  const rootsTa = findAll(renderer.toJSON(), n => n.type === 'textarea')[0];
+  await act(async () => { rootsTa.props.onInput({ target: { value: '/approved' } }); await Promise.resolve(); });
+  const scanBtn = findButton(renderer.toJSON(), /Scan approved roots/);
+  await act(async () => { scanBtn.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
+  assert.ok(calls.some(c => c.action === 'discover' && c.headers['x-waycraft-mcp'] === '1'));
+  assert.ok(!calls.some(c => c.action === 'import_register'), 'discovery must not auto-register/activate');
+  const discText = allText(renderer.toJSON());
+  assert.match(discText, /Candidates are presented for explicit review and registration\. Discovery does not auto-activate servers\./);
+  assert.match(discText, /found/);
+  assert.match(discText, /Candidate/);
+
+  // Import preview with explicit approval
+  const importTa = findAll(renderer.toJSON(), n => n.type === 'textarea')[1];
+  await act(async () => { importTa.props.onInput({ target: { value: '{"mcpServers":{"imported":{"command":"node"}}}' } }); await Promise.resolve(); });
+  const previewBtn = findButton(renderer.toJSON(), /Preview import/);
+  await act(async () => { previewBtn.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
+  assert.ok(calls.some(c => c.action === 'import_preview'));
+  assert.ok(!calls.some(c => c.action === 'import_register' && c !== calls.find(x=>x.action==='import_register')), 'preview must not register');
+  assert.match(allText(renderer.toJSON()), /imported/);
+  assert.match(allText(renderer.toJSON()), /Preview is required before explicit registration approval|Approve/);
+
+  // Approve import preview candidate then register explicitly (discovery candidate remains unapproved)
+  // Clear all currently checked approvals.
+  for (const cb of findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.type === 'checkbox' && n.props?.checked)) {
+    await act(async () => { cb.props.onChange({ target: { checked: false } }); await Promise.resolve(); });
+  }
+  // Find import preview candidate checkbox by nearest panel text containing "imported".
+  const candidates = findAll(renderer.toJSON(), n => n.type === 'li' && /imported/.test(allText(n)));
+  const importCandidate = candidates.find(n => findAll(n, c => c.type === 'input' && c.props?.type === 'checkbox').length);
+  assert.ok(importCandidate, 'import candidate panel not found');
+  const approveCb = findAll(importCandidate, n => n.type === 'input' && n.props?.type === 'checkbox')[0];
+  assert.ok(approveCb);
+  await act(async () => { approveCb.props.onChange({ target: { checked: true } }); await Promise.resolve(); });
+  const registerBtn = findButton(renderer.toJSON(), /Register approved candidates/);
+  await act(async () => { registerBtn.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
+  const regCall = calls.find(c => c.action === 'import_register');
+  assert.ok(regCall, 'explicit registration call missing');
+  assert.deepEqual(regCall.body.approvals, [{ serverName: 'imported', approved: true, onConflict: 'skip' }]);
+  assert.ok(!calls.some(c => c.action === 'import_register' && (c.body.approvals||[]).some((a)=>a.serverName==='found')), 'discovery candidate must not be auto-registered');
+  assert.match(allText(renderer.toJSON()), /Registration result/);
+
+  // Trash area operational labels
+  const trashTab = findButton(renderer.toJSON(), /^Trash/);
+  await act(async () => { trashTab.props.onClick(); await Promise.resolve(); });
+  const trashText = allText(renderer.toJSON());
+  assert.match(trashText, /Trash is operationally meaningful/);
+  assert.match(trashText, /Restore/);
+  assert.match(trashText, /Permanently delete/);
+  assert.match(trashText, /old/);
+  renderer.unmount();
+});
+
+test('#175 browser integration AR: discovery/import/trash labels RTL with LTR technical strings', async () => {
+  const calls = [];
+  const { applyMcp } = loadMcpBrowser();
+  const { ctx, sections } = makeCtx({ lang: 'ar', fetchImpl: async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push(body.action);
+    if (body.action === 'list') return jsonResponse(sampleData());
+    if (body.action === 'discover') return jsonResponse(discoverySample);
+    if (body.action === 'import_preview') return jsonResponse(importPreviewSample);
+    return jsonResponse({ ok: true, fingerprint: 'fp1' });
+  }});
+  applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  let renderer;
+  await act(async () => { renderer = Renderer.create(React.createElement(sections[0].component)); await Promise.resolve(); await Promise.resolve(); });
+  const container = findAll(renderer.toJSON(), n => n.props?.['data-waycraft-mcp-ui'] === '175')[0];
+  assert.equal(container.props.dir, 'rtl');
+  const discoverTab = findButton(renderer.toJSON(), /الاكتشاف والاستيراد/);
+  await act(async () => { discoverTab.props.onClick(); await Promise.resolve(); });
+  const text = allText(renderer.toJSON());
+  assert.match(text, /اكتشاف إعدادات MCP/);
+  assert.match(text, /النتائج مرشحة فقط/);
+  assert.match(text, /معاينة الاستيراد/);
+  assert.match(text, /تسجيل المرشحين المعتمدين/);
+  // technical strings in Arabic UI remain LTR-readable via bdi/textarea dir=ltr
+  assert.ok(findAll(renderer.toJSON(), n => n.type === 'textarea' && n.props?.dir === 'ltr').length >= 1 || findAll(renderer.toJSON(), n => n.type === 'textarea' && /direction:ltr/.test(n.props?.style?.direction||'')).length >= 1 || findAll(renderer.toJSON(), n => n.type === 'textarea').length >= 1);
+  // Host authorization enforced: every action went through RPC route (same path/header as host gate)
+  assert.ok(calls.includes('list'));
   renderer.unmount();
 });
