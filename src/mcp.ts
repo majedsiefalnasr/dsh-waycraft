@@ -16,6 +16,7 @@ import { sanitizeMcpObservable } from './mcp-credentials.js';
 import { assertTrustApprovedForAction } from './mcp-trust.js';
 import { McpToolCacheStore, resolveMcpToolCachePath, searchMcpTools } from './mcp-tool-cache.js';
 import { previewMcpImport, registerMcpImport, type McpImportRegisterItem } from './mcp-import.js';
+import { discoverMcpConfigs } from './mcp-discovery.js';
 
 export const name = 'dsh-waycraft/mcp';
 export const inject = ['connection'] as const;
@@ -244,6 +245,20 @@ export function apply(ctx: any, _config: Config = {}): void {
           });
           const list = await store.list();
           return json({ ok: result.ok, fingerprint: list.fingerprint, import: sanitizeMcpObservable(result), servers: list.servers }, result.ok ? 200 : 207);
+        }
+        if (action === 'discover' || action === 'discover_filesystem') {
+          // #172: scan only user-approved folders for known MCP config files.
+          // Explicit Owner action; no command execution; no auto-activation/registration.
+          const roots = Array.isArray(body?.roots) ? body.roots.filter((r: unknown): r is string => typeof r === 'string') : [];
+          if (!roots.length) return reject(400, 'roots required (approved search roots)');
+          const list = await store.list();
+          const discovery = await discoverMcpConfigs({
+            roots,
+            existingServerNames: list.servers.map((s: any) => s.serverName),
+            maxFileBytes: typeof body?.maxFileBytes === 'number' ? body.maxFileBytes : undefined,
+            maxFiles: typeof body?.maxFiles === 'number' ? body.maxFiles : undefined,
+          });
+          return json({ ok: discovery.ok, fingerprint: list.fingerprint, discovery: sanitizeMcpObservable(discovery) }, 200);
         }
         return reject(400, 'Unknown action');
       },

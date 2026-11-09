@@ -29,6 +29,7 @@
     "src/mcp-trust.ts",
     "src/mcp-connection-test.ts",
     "src/mcp-tool-cache.ts",
-    "src/mcp-import.ts"
+    "src/mcp-import.ts",
+    "src/mcp-discovery.ts"
   ]
 }
