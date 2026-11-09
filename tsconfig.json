@@ -25,6 +25,7 @@
     "src/mcp.ts",
     "src/mcp-schema.ts",
     "src/mcp-config-store.ts",
-    "src/mcp-credentials.ts"
+    "src/mcp-credentials.ts",
+    "src/mcp-trust.ts"
   ]
 }

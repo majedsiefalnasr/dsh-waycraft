@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { McpCordisConfigStore } from './mcp-config-store.js';
 import { sanitizeMcpObservable } from './mcp-credentials.js';
+import { assertTrustApprovedForAction } from './mcp-trust.js';
 
 export const name = 'dsh-waycraft/mcp';
 export const inject = ['connection'] as const;
@@ -61,6 +62,7 @@ function mapPersistenceStatus(code?: string): number {
     case 'not_found': return 404;
     case 'exists': return 409;
     case 'parse': return 422;
+    case 'trust_required': return 403;
     default: return 500;
   }
 }
@@ -120,6 +122,33 @@ export function apply(ctx: any, _config: Config = {}): void {
           const result = await store.remove(serverName, expectedFingerprint);
           if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to remove MCP server', { code: result.code, fingerprint: result.fingerprint });
           return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers });
+        }
+        if (action === 'trust_status') {
+          const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
+          if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
+          const result = await store.trustStatus(serverName);
+          if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to get trust status', { code: result.code, fingerprint: result.fingerprint });
+          return json({ ok: true, fingerprint: result.fingerprint, server: result.server });
+        }
+        if (action === 'approve_trust') {
+          // #167: explicit Owner trust approval binds to reviewed configuration fingerprint.
+          const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
+          if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
+          const result = await store.approveTrust(serverName, expectedFingerprint);
+          if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to approve trust', { code: result.code, fingerprint: result.fingerprint });
+          return json({ ok: true, fingerprint: result.fingerprint, server: result.server, servers: result.servers });
+        }
+        if (action === 'test_connection') {
+          // #167/#168 boundary: explicit connection testing cannot bypass required trust approval.
+          const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
+          if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
+          const trust = await store.trustStatus(serverName);
+          if (!trust.ok || !trust.server) return reject(mapPersistenceStatus(trust.code), trust.message || 'Failed to get trust status', { code: trust.code, fingerprint: trust.fingerprint });
+          try { assertTrustApprovedForAction((trust.server as any).trust, 'test_connection'); } catch (err: any) {
+            return reject(403, err.message, { code: err.code || 'trust_required', trust: err.trust, fingerprint: trust.fingerprint });
+          }
+          // Connection test implementation arrives in #168. Trust gate is enforced here.
+          return json({ ok: true, fingerprint: trust.fingerprint, server: trust.server, test: { supported: false, gatedByTrust: true, message: 'Connection testing implementation pending (#168).' } });
         }
         return reject(400, 'Unknown action');
       },
