@@ -18,6 +18,13 @@ import type { McpServerConfig } from './mcp-schema.js';
 
 export type McpProbeStage = 'connect' | 'list' | 'capability' | 'config';
 
+export interface McpToolDescriptor {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+  title?: string;
+}
+
 export interface McpConnectionTestResult {
   ok: boolean;
   stage?: McpProbeStage;
@@ -27,6 +34,7 @@ export interface McpConnectionTestResult {
   capabilityVerified: boolean;
   serverInfo?: { name?: string; version?: string };
   toolNames?: string[];
+  tools?: McpToolDescriptor[];
   truncated?: boolean;
   closeConfirmed?: boolean;
   cleanupError?: string;
@@ -72,6 +80,7 @@ async function tryMcpManagerProbe(serverName: string, opts: McpConnectionTestOpt
         capabilityVerified: true,
         serverInfo: (raw as any).serverInfo,
         toolNames: Array.isArray((raw as any).toolNames) ? (raw as any).toolNames.slice(0, MAX_TOOL_NAMES) : undefined,
+        tools: Array.isArray((raw as any).tools) ? sanitizeMcpObservable((raw as any).tools.slice(0, MAX_TOOL_NAMES)) as McpToolDescriptor[] : (Array.isArray((raw as any).toolNames) ? (raw as any).toolNames.slice(0, MAX_TOOL_NAMES).map((n: any) => ({ name: String(n) })) : undefined),
         truncated: !!(raw as any).truncated,
         closeConfirmed: (raw as any).closeConfirmed,
         cleanupError: (raw as any).cleanupError ? safeText((raw as any).cleanupError) : undefined,
@@ -111,6 +120,7 @@ async function tryDshMcpClientProbe(config: McpServerConfig, opts: McpConnection
         ok: true, message: 'Connected', durationMs: Number(raw.durationMs ?? now() - started),
         capability: 'dsh-mcp-client.probeServer', capabilityVerified: true,
         serverInfo: raw.serverInfo, toolNames: Array.isArray(raw.toolNames) ? raw.toolNames.slice(0, MAX_TOOL_NAMES) : undefined,
+        tools: Array.isArray(raw.tools) ? sanitizeMcpObservable(raw.tools.slice(0, MAX_TOOL_NAMES)) as McpToolDescriptor[] : (Array.isArray(raw.toolNames) ? raw.toolNames.slice(0, MAX_TOOL_NAMES).map((n: any) => ({ name: String(n) })) : undefined),
         truncated: !!raw.truncated, closeConfirmed: raw.closeConfirmed, cleanupError: raw.cleanupError ? safeText(raw.cleanupError) : undefined,
       };
     }
@@ -173,7 +183,7 @@ async function directSdkProbe(config: McpServerConfig, opts: McpConnectionTestOp
     await client.connect(transport, { signal: controller.signal });
     stage = 'list';
     const serverInfo = typeof client.getServerVersion === 'function' ? client.getServerVersion() : undefined;
-    const toolNames: string[] = [];
+    const tools: McpToolDescriptor[] = [];
     let truncated = false;
     let cursor: string | undefined;
     const caps = typeof client.getServerCapabilities === 'function' ? client.getServerCapabilities() : undefined;
@@ -181,8 +191,8 @@ async function directSdkProbe(config: McpServerConfig, opts: McpConnectionTestOp
       for (let page = 0; page < (opts.maxPages ?? MAX_PAGES); page++) {
         const res = await client.listTools(cursor ? { cursor } : undefined, { signal: controller.signal });
         for (const t of res?.tools || []) {
-          if (toolNames.length >= (opts.maxToolNames ?? MAX_TOOL_NAMES)) { truncated = true; break; }
-          toolNames.push(String(t.name));
+          if (tools.length >= (opts.maxToolNames ?? MAX_TOOL_NAMES)) { truncated = true; break; }
+          tools.push(sanitizeMcpObservable({ name: String(t.name), description: t.description ? String(t.description) : undefined, inputSchema: t.inputSchema, title: (t as any).title ? String((t as any).title) : undefined }) as McpToolDescriptor);
         }
         cursor = res?.nextCursor;
         if (!cursor || truncated) break;
@@ -191,7 +201,7 @@ async function directSdkProbe(config: McpServerConfig, opts: McpConnectionTestOp
     let closeConfirmed = true;
     let cleanupError: string | undefined;
     try { await client.close(); } catch (e) { closeConfirmed = false; cleanupError = safeText(e); }
-    return { ok: true, message: 'Connected', durationMs: now() - started, capability: 'direct-mcp-sdk', capabilityVerified: true, serverInfo, toolNames, truncated, closeConfirmed, cleanupError };
+    return { ok: true, message: 'Connected', durationMs: now() - started, capability: 'direct-mcp-sdk', capabilityVerified: true, serverInfo, toolNames: tools.map(t => t.name), tools, truncated, closeConfirmed, cleanupError };
   } catch (err) {
     const msg = controller.signal.aborted && !(opts.signal?.aborted) ? `Connection test timed out after ${timeoutMs}ms` : safeText(err);
     let closeConfirmed = false;
