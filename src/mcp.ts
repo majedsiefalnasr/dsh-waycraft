@@ -5,10 +5,12 @@
  * #163: Owner-authorized management RPC + browser panel integration.
  * #165: safe persistent CRUD for MCP server entries in DSH cordis.patch.yml
  * (atomic replace, optimistic concurrency, unknown-field preservation).
+ * #168: explicit connection testing/status reporting (trust-gated).
  */
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { McpCordisConfigStore } from './mcp-config-store.js';
+import { testMcpConnection } from './mcp-connection-test.js';
 import { sanitizeMcpObservable } from './mcp-credentials.js';
 import { assertTrustApprovedForAction } from './mcp-trust.js';
 
@@ -139,7 +141,8 @@ export function apply(ctx: any, _config: Config = {}): void {
           return json({ ok: true, fingerprint: result.fingerprint, server: result.server, servers: result.servers });
         }
         if (action === 'test_connection') {
-          // #167/#168 boundary: explicit connection testing cannot bypass required trust approval.
+          // #167/#168: explicit connection testing cannot bypass required trust approval.
+          // No auto-test on import/create (action is explicit only).
           const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
           if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
           const trust = await store.trustStatus(serverName);
@@ -147,8 +150,15 @@ export function apply(ctx: any, _config: Config = {}): void {
           try { assertTrustApprovedForAction((trust.server as any).trust, 'test_connection'); } catch (err: any) {
             return reject(403, err.message, { code: err.code || 'trust_required', trust: err.trust, fingerprint: trust.fingerprint });
           }
-          // Connection test implementation arrives in #168. Trust gate is enforced here.
-          return json({ ok: true, fingerprint: trust.fingerprint, server: trust.server, test: { supported: false, gatedByTrust: true, message: 'Connection testing implementation pending (#168).' } });
+          const server = trust.server as any;
+          const test = await testMcpConnection(serverName, server.config, {
+            ctx,
+            timeoutMs: typeof body.timeoutMs === 'number' ? body.timeoutMs : undefined,
+            maxPages: typeof body.maxPages === 'number' ? body.maxPages : undefined,
+            maxToolNames: typeof body.maxToolNames === 'number' ? body.maxToolNames : undefined,
+          });
+          // Return actionable success/failure; never expose raw secrets.
+          return json({ ok: test.ok, fingerprint: trust.fingerprint, server: sanitizeMcpObservable(server), test: sanitizeMcpObservable(test) }, test.ok ? 200 : 502);
         }
         return reject(400, 'Unknown action');
       },
