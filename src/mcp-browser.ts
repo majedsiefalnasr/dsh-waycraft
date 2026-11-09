@@ -1,6 +1,6 @@
-// Waycraft MCP Manager — browser-side server-centric UI (#174).
+// Waycraft MCP Manager — browser-side server-centric UI (#174, #175).
 // V1: read-only tool management, no Global/Project scope selectors, no per-tool controls.
-// Host authorization enforced server-side for /api/waycraft-mcp.manage.
+// Discovery/import results are candidates only; explicit approval required; host auth enforced.
 export function applyMcp(root: any): void {
   const fail = (error: unknown) =>
     console.error('dsh-waycraft: MCP manager setup failed', error);
@@ -28,6 +28,9 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   const en = {
     title: 'MCP servers',
     description: 'Manage MCP servers for this DSH profile. Management actions require Owner authorization.',
+    areaServers: 'Servers',
+    areaDiscoverImport: 'Discover & Import',
+    areaTrash: 'Trash',
     search: 'Search servers',
     filterAll: 'All',
     filterConnected: 'Connected (last test)',
@@ -42,6 +45,35 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     error: 'Unable to load MCP servers.',
     unauthorized: 'Owner authorization required. Paired clients cannot manage MCP servers.',
     retry: 'Retry',
+    discoverTitle: 'Discover MCP configs',
+    discoverNote: 'Scans only Owner-approved folders for known MCP config files. Results are candidates only; no servers are executed or activated.',
+    discoverRoots: 'Approved search roots (one per line)',
+    discoverScan: 'Scan approved roots',
+    discoverEmpty: 'No discovery results yet.',
+    discoverCandidate: 'Candidate',
+    discoverMalformed: 'Malformed',
+    discoverOversized: 'Oversized',
+    discoverUnreadable: 'Unreadable',
+    discoverSkipped: 'Skipped',
+    discoverCandidatesNote: 'Candidates are presented for explicit review and registration. Discovery does not auto-activate servers.',
+    importTitle: 'Import MCP configuration',
+    importNote: 'Paste supported JSON. Preview is required before explicit registration approval. Import never executes servers and does not imply trust.',
+    importJson: 'Import JSON',
+    importPreview: 'Preview import',
+    importApproveRegister: 'Register approved candidates',
+    importNoPreview: 'Preview the import before registration.',
+    importSelect: 'Approve',
+    importConflictSkip: 'Skip existing',
+    importConflictReplace: 'Replace existing (explicit)',
+    importValid: 'Valid',
+    importInvalid: 'Invalid',
+    importConflict: 'Conflict',
+    importCredRefs: 'Credential refs',
+    importRegistered: 'Registration result',
+    trashNote: 'Trash is operationally meaningful: trashed servers are inactive and removed from the active list. Restore revalidates trust; permanent delete requires explicit confirmation.',
+    trashMoveAction: 'Move selected to Trash',
+    trashRestoreAction: 'Restore selected',
+    trashPermanentAction: 'Permanently delete selected',
     overview: 'Overview',
     tools: 'Tools',
     configuration: 'Configuration',
@@ -103,6 +135,9 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   const ar = {
     title: 'خوادم MCP',
     description: 'إدارة خوادم MCP لملف DSH هذا. إجراءات الإدارة تتطلب تفويض المالك.',
+    areaServers: 'الخوادم',
+    areaDiscoverImport: 'الاكتشاف والاستيراد',
+    areaTrash: 'سلة المهملات',
     search: 'بحث في الخوادم',
     filterAll: 'الكل',
     filterConnected: 'متصل (آخر اختبار)',
@@ -117,6 +152,35 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     error: 'تعذّر تحميل خوادم MCP.',
     unauthorized: 'مطلوب تفويض المالك. لا يمكن للعملاء المقترنين إدارة خوادم MCP.',
     retry: 'إعادة المحاولة',
+    discoverTitle: 'اكتشاف إعدادات MCP',
+    discoverNote: 'يفحص فقط المجلدات التي وافق عليها المالك بحثًا عن ملفات إعداد MCP المعروفة. النتائج مرشحة فقط؛ لا يتم تنفيذ أي خادم أو تفعيله.',
+    discoverRoots: 'جذور البحث المعتمدة (سطر لكل جذر)',
+    discoverScan: 'فحص الجذور المعتمدة',
+    discoverEmpty: 'لا توجد نتائج اكتشاف بعد.',
+    discoverCandidate: 'مرشح',
+    discoverMalformed: 'تالف',
+    discoverOversized: 'كبير جدًا',
+    discoverUnreadable: 'غير قابل للقراءة',
+    discoverSkipped: 'تم التخطي',
+    discoverCandidatesNote: 'تُعرض المرشحات للمراجعة والتسجيل الصريح. الاكتشاف لا يفعّل الخوادم تلقائيًا.',
+    importTitle: 'استيراد إعداد MCP',
+    importNote: 'ألصق JSON مدعومًا. المعاينة مطلوبة قبل موافقة التسجيل الصريحة. الاستيراد لا ينفّذ الخوادم ولا يعني الثقة.',
+    importJson: 'JSON للاستيراد',
+    importPreview: 'معاينة الاستيراد',
+    importApproveRegister: 'تسجيل المرشحين المعتمدين',
+    importNoPreview: 'عاين الاستيراد قبل التسجيل.',
+    importSelect: 'اعتماد',
+    importConflictSkip: 'تخطي الموجود',
+    importConflictReplace: 'استبدال الموجود (صريح)',
+    importValid: 'صالح',
+    importInvalid: 'غير صالح',
+    importConflict: 'تعارض',
+    importCredRefs: 'مراجع الاعتماد',
+    importRegistered: 'نتيجة التسجيل',
+    trashNote: 'سلة المهملات ذات معنى تشغيلي: الخوادم المنقولة إليها غير نشطة ومزالة من القائمة النشطة. الاستعادة تعيد التحقق من الثقة؛ الحذف النهائي يتطلب تأكيدًا صريحًا.',
+    trashMoveAction: 'نقل المحدد إلى سلة المهملات',
+    trashRestoreAction: 'استعادة المحدد',
+    trashPermanentAction: 'حذف المحدد نهائيًا',
     overview: 'نظرة عامة',
     tools: 'الأدوات',
     configuration: 'الإعدادات',
@@ -256,6 +320,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     const [servers, setServers] = React.useState([] as any[]);
     const [trashed, setTrashed] = React.useState([] as any[]);
     const [fingerprint, setFingerprint] = React.useState('');
+    const [area, setArea] = React.useState('servers'); // servers | discover | trash
     const [filter, setFilter] = React.useState('all');
     const [query, setQuery] = React.useState('');
     const [selected, setSelected] = React.useState(null as string|null);
@@ -264,10 +329,18 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     const [notice, setNotice] = React.useState(null as any);
     const [confirm, setConfirmState] = React.useState(null as any);
     const [toolCache, setToolCache] = React.useState({} as Record<string,any>);
+    // #175 discovery/import (candidates only, explicit approval, no auto-activation)
+    const [discoverRoots, setDiscoverRoots] = React.useState('');
+    const [discovery, setDiscovery] = React.useState(null as any);
+    const [importText, setImportText] = React.useState('');
+    const [importPreview, setImportPreview] = React.useState(null as any);
+    const [importApprovals, setImportApprovals] = React.useState({} as Record<string,{approved:boolean,onConflict:'skip'|'replace'}>);
+    const [importResult, setImportResult] = React.useState(null as any);
     const alive = React.useRef(true);
 
     const load = React.useCallback(async () => {
-      setState({ kind: 'loading' }); setNotice(null);
+      if (state.kind === 'loading' || servers.length === 0) setState({ kind: 'loading' });
+      setNotice(null);
       try {
         const data = await rpc('list');
         if (!alive.current) return;
@@ -296,11 +369,10 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       if (q && !String(s.serverName||'').toLowerCase().includes(q)) return false;
       if (filter === 'all') return true;
       if (filter === 'needsTrust') return ['untrusted','invalidated'].includes(s.trust?.status);
-      if (filter === 'disconnected') return true; // observed connection not tracked in V1 config; show all as candidates
       return true;
     };
-    const visibleServers = filter === 'trashed' ? trashed : servers.filter(matches);
-    const current = (filter === 'trashed' ? trashed : servers).find((s:any)=>s.serverName===selected) || visibleServers[0] || null;
+    const visibleServers = servers.filter(matches);
+    const current = servers.find((s:any)=>s.serverName===selected) || visibleServers[0] || trashed.find((s:any)=>s.serverName===selected) || null;
 
     if (state.kind === 'loading') return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr' }, h('style', null, STYLE), h('p', { role: 'status' }, t('loading')));
     if (state.kind === 'unauthorized') return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr' }, h('style', null, STYLE), h('p', { role: 'alert' }, t('unauthorized')));
@@ -312,13 +384,80 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       h('button', { type: 'button', disabled: !!busy, onClick: () => setConfirmState(null) }, t('cancel')),
     ) : null;
 
+    const renderCandidate = (c:any, key:string) => h('li', { key, className: 'waycraft-mcp-panel' },
+      h('div', { className: 'waycraft-mcp-row' },
+        h('strong', null, ltr(c.serverName)),
+        h('span', { className: 'waycraft-mcp-meta' }, c.valid ? t('importValid') : t('importInvalid'), c.conflict ? ` · ${t('importConflict')}` : '', c.credentialRefs?.length ? ` · ${t('importCredRefs')}: ${c.credentialRefs.length}` : '')),
+      c.conflict ? h('p', { className: 'waycraft-mcp-note', role: 'status' }, c.conflict.message || t('importConflict')) : null,
+      c.scopeNote ? h('p', { className: 'waycraft-mcp-note' }, c.scopeNote) : null,
+      c.issues?.length ? h('p', { className: 'waycraft-mcp-note', role: 'status' }, c.issues.map((i:any)=>i.message||i.code).join('; ')) : null,
+      h('label', { style: { display:'flex', gap:'8px', alignItems:'center' } },
+        h('input', { type: 'checkbox', checked: !!importApprovals[c.serverName]?.approved, disabled: !c.valid, onChange: (e:any)=>setImportApprovals((m:any)=>({ ...m, [c.serverName]: { approved: e.target.checked, onConflict: m[c.serverName]?.onConflict || 'skip' } })) }),
+        t('importSelect')),
+      c.conflict?.kind === 'duplicate_existing' ? h('select', { 'aria-label': t('importConflict'), value: importApprovals[c.serverName]?.onConflict || 'skip', onChange: (e:any)=>setImportApprovals((m:any)=>({ ...m, [c.serverName]: { approved: !!m[c.serverName]?.approved, onConflict: e.target.value } })) },
+        h('option', { value: 'skip' }, t('importConflictSkip')), h('option', { value: 'replace' }, t('importConflictReplace'))) : null,
+      h('pre', { className: 'waycraft-mcp-pre' }, JSON.stringify(c.config||{}, null, 2))
+    );
+
+    const discoveryArea = h('section', { 'aria-label': t('discoverTitle'), className: 'waycraft-mcp-card' },
+      h('strong', null, t('discoverTitle')),
+      h('p', { className: 'waycraft-mcp-note' }, t('discoverNote')),
+      h('p', { className: 'waycraft-mcp-note' }, t('discoverCandidatesNote')),
+      h('label', null, t('discoverRoots'), h('textarea', { value: discoverRoots, onInput: (e:any)=>setDiscoverRoots(e.target.value), rows: 3, style: { width:'100%', minBlockSize:'72px', padding:'8px', border:'0.5px solid var(--dsw-alias-border-l2)', borderRadius:'12px', background:'var(--dsw-alias-bg-layer-1)', color:'inherit', direction:'ltr', font:'inherit' } })),
+      h('div', { className: 'waycraft-mcp-row' },
+        h('button', { type: 'button', disabled: !!busy, onClick: () => void run('discover', async () => {
+          const roots = discoverRoots.split(/\n+/).map((s:string)=>s.trim()).filter(Boolean);
+          if (!roots.length) throw new Error(t('discoverRoots'));
+          const d = await rpc('discover', { roots });
+          setDiscovery(d.discovery || d);
+          return d;
+        }) }, t('discoverScan'))),
+      discovery ? h('div', { className: 'waycraft-mcp-panel' },
+        h('p', { className: 'waycraft-mcp-meta' }, t('discoverCandidate'), ': ', String(discovery.stats?.candidates||0), ' · ', t('discoverMalformed'), ': ', String(discovery.stats?.malformed||0), ' · ', t('discoverOversized'), ': ', String(discovery.stats?.oversized||0)),
+        h('ul', { className: 'waycraft-mcp-list' }, (discovery.files||[]).length ? (discovery.files||[]).map((f:any,i:number)=>h('li', { key: f.path||i, className: 'waycraft-mcp-panel' },
+          h('div', { className: 'waycraft-mcp-row' }, h('strong', null, ltr(f.relativePath||f.path||'')), h('span', { className: 'waycraft-mcp-meta' }, f.status)),
+          f.message ? h('p', { className: 'waycraft-mcp-note' }, f.message) : null,
+          f.preview?.candidates?.length ? h('ul', { className: 'waycraft-mcp-list' }, f.preview.candidates.map((c:any,j:number)=>renderCandidate(c, `${f.path}:${j}`))) : null
+        )) : h('li', { className: 'waycraft-mcp-note' }, t('discoverEmpty')))
+      ) : h('p', { className: 'waycraft-mcp-note' }, t('discoverEmpty'))
+    );
+
+    const importArea = h('section', { 'aria-label': t('importTitle'), className: 'waycraft-mcp-card' },
+      h('strong', null, t('importTitle')),
+      h('p', { className: 'waycraft-mcp-note' }, t('importNote')),
+      h('label', null, t('importJson'), h('textarea', { value: importText, onInput: (e:any)=>{ setImportText(e.target.value); setImportPreview(null); setImportResult(null); }, rows: 6, style: { width:'100%', minBlockSize:'120px', padding:'8px', border:'0.5px solid var(--dsw-alias-border-l2)', borderRadius:'12px', background:'var(--dsw-alias-bg-layer-1)', color:'inherit', direction:'ltr', font:'12px/18px monospace' } })),
+      h('div', { className: 'waycraft-mcp-row' },
+        h('button', { type: 'button', disabled: !!busy, onClick: () => void run('import-preview', async () => {
+          let input:any = importText;
+          try { input = JSON.parse(importText); } catch {}
+          const d = await rpc('import_preview', { input });
+          setImportPreview(d.preview || d);
+          setImportApprovals({});
+          setImportResult(null);
+          return d;
+        }) }, t('importPreview')),
+        h('button', { type: 'button', disabled: !!busy || !importPreview?.ok, onClick: () => void run('import-register', async () => {
+          const approvals = Object.entries(importApprovals).filter(([,v]:any)=>v?.approved).map(([serverName,v]:any)=>({ serverName, approved: true, onConflict: v.onConflict || 'skip' }));
+          if (!approvals.length) throw new Error(t('importNoPreview'));
+          const d = await rpc('import_register', { preview: importPreview, approvals });
+          setImportResult(d.import || d);
+          setImportPreview(null); setImportApprovals({});
+          return d;
+        }) }, t('importApproveRegister'))),
+      !importPreview ? h('p', { className: 'waycraft-mcp-note' }, t('importNoPreview')) : h('div', { className: 'waycraft-mcp-panel' },
+        h('p', { className: 'waycraft-mcp-meta' }, t('importValid'), ': ', String(importPreview.stats?.valid||0), ' · ', t('importInvalid'), ': ', String(importPreview.stats?.invalid||0), ' · ', t('importConflict'), ': ', String(importPreview.stats?.conflicts||0)),
+        importPreview.scope?.note ? h('p', { className: 'waycraft-mcp-note' }, importPreview.scope.note) : null,
+        h('ul', { className: 'waycraft-mcp-list' }, (importPreview.candidates||[]).map((c:any,i:number)=>renderCandidate(c, `import:${i}`)))),
+      importResult ? h('div', { role: 'status', className: 'waycraft-mcp-alert' }, t('importRegistered'), ': ', ltr(JSON.stringify(importResult.stats||importResult))) : null
+    );
+
     const serverRow = (s:any, inTrash:boolean) => h('li', { key: s.serverName, className: 'waycraft-mcp-card' },
       h('div', { className: 'waycraft-mcp-row' },
         h('strong', null, ltr(s.serverName)),
         h('span', { className: 'waycraft-mcp-meta' }, statusLabel(s), ' · ', trustLabel(s.trust))),
       h('div', { className: 'waycraft-mcp-meta' }, t('ownership'), ': ', ownershipLabel(s.ownership), ' · ', t('transport'), ': ', ltr(s.config?.transport)),
       h('div', { className: 'waycraft-mcp-row' },
-        h('button', { type: 'button', onClick: () => { setSelected(s.serverName); setTab('overview'); }, 'aria-pressed': selected===s.serverName }, t('overview')),
+        !inTrash ? h('button', { type: 'button', onClick: () => { setSelected(s.serverName); setTab('overview'); setArea('servers'); }, 'aria-pressed': selected===s.serverName }, t('overview')) : null,
         inTrash
           ? h(React.Fragment, null,
               h('button', { type: 'button', disabled: !!busy, onClick: () => setConfirmState({ label: `${t('restore')}: ${s.serverName}?`, fn: () => rpc('restore', { serverName: s.serverName, expectedFingerprint: fingerprint }) }) }, t('restore')),
@@ -330,7 +469,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       )
     );
 
-    const detail = current ? h('section', { 'aria-label': t('tabs'), className: 'waycraft-mcp-card' },
+    const detail = (area === 'servers' && current && !current.trash?.trashed) ? h('section', { 'aria-label': t('tabs'), className: 'waycraft-mcp-card' },
       h('div', { className: 'waycraft-mcp-row' }, h('strong', null, ltr(current.serverName)), h('span', { className: 'waycraft-mcp-meta' }, ownershipLabel(current.ownership))),
       h('div', { className: 'waycraft-mcp-tabs', role: 'tablist', 'aria-label': t('tabs') },
         ['overview','tools','configuration','security'].map(id => h('button', { key: id, type: 'button', role: 'tab', 'aria-selected': tab===id, tabIndex: tab===id?0:-1, onClick: ()=>setTab(id) }, t(id==='security'?'security':id)))),
@@ -366,22 +505,33 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       ) : null,
     ) : null;
 
-    return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr', 'data-waycraft-mcp-ui': '174' },
+    const serversArea = h('div', null,
+      h('div', { className: 'waycraft-mcp-toolbar', role: 'search' },
+        h('input', { type: 'search', 'aria-label': t('search'), placeholder: t('search'), value: query, onInput: (e:any)=>setQuery(e.target.value) }),
+        h('select', { 'aria-label': t('filterAll'), value: filter, onChange: (e:any)=>setFilter(e.target.value) },
+          h('option',{value:'all'},t('filterAll')), h('option',{value:'needsTrust'},t('filterNeedsTrust'))),
+        h('button', { type: 'button', disabled: !!busy, onClick: load }, t('refresh'))),
+      h('ul', { className: 'waycraft-mcp-list', 'aria-label': t('serverList') }, visibleServers.length ? visibleServers.map((s:any)=>serverRow(s,false)) : h('li', { className: 'waycraft-mcp-note' }, t('empty'))),
+      detail
+    );
+
+    const trashArea = h('div', null,
+      h('p', { className: 'waycraft-mcp-note' }, t('trashNote')),
+      h('ul', { className: 'waycraft-mcp-list', 'aria-label': t('trashList') }, trashed.length ? trashed.map((s:any)=>serverRow(s,true)) : h('li', { className: 'waycraft-mcp-note' }, t('emptyTrash')))
+    );
+
+    return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr', 'data-waycraft-mcp-ui': '175' },
       h('style', null, STYLE),
       h('div', { className: 'waycraft-mcp-head' }, h('h3', null, t('title'))),
       h('p', { className: 'waycraft-mcp-note' }, t('description')),
       h('p', { className: 'waycraft-mcp-note' }, t('runtimeNote')),
       notice ? h('p', { role: notice.kind==='err'?'alert':'status', className: 'waycraft-mcp-alert' }, notice.text, notice.code ? ` (${notice.code})` : '') : null,
       confirmUi,
-      h('div', { className: 'waycraft-mcp-toolbar', role: 'search' },
-        h('input', { type: 'search', 'aria-label': t('search'), placeholder: t('search'), value: query, onInput: (e:any)=>setQuery(e.target.value) }),
-        h('select', { 'aria-label': t('filterAll'), value: filter, onChange: (e:any)=>setFilter(e.target.value) },
-          h('option',{value:'all'},t('filterAll')), h('option',{value:'needsTrust'},t('filterNeedsTrust')), h('option',{value:'trashed'},t('filterTrashed'))),
-        h('button', { type: 'button', disabled: !!busy, onClick: load }, t('refresh'))),
-      filter === 'trashed'
-        ? h('ul', { className: 'waycraft-mcp-list', 'aria-label': t('trashList') }, visibleServers.length ? visibleServers.map((s:any)=>serverRow(s,true)) : h('li', { className: 'waycraft-mcp-note' }, t('emptyTrash')))
-        : h('ul', { className: 'waycraft-mcp-list', 'aria-label': t('serverList') }, visibleServers.length ? visibleServers.map((s:any)=>serverRow(s,false)) : h('li', { className: 'waycraft-mcp-note' }, t('empty'))),
-      detail
+      h('div', { className: 'waycraft-mcp-tabs', role: 'tablist', 'aria-label': t('title') },
+        [['servers',t('areaServers')],['discover',t('areaDiscoverImport')],['trash',t('areaTrash')]].map(([id,label]:any)=>h('button',{key:id,type:'button',role:'tab','aria-selected':area===id,tabIndex:area===id?0:-1,onClick:()=>setArea(id)},label, id==='trash' && trashed.length ? ` (${trashed.length})` : ''))),
+      area === 'servers' ? serversArea : null,
+      area === 'discover' ? h('div', null, discoveryArea, importArea) : null,
+      area === 'trash' ? trashArea : null
     );
   }
 
