@@ -1,5 +1,10 @@
 # Changelog
 
+
+## Unreleased
+
+- Added the **Waycraft MCP Manager** V1 component (`waycraft-mcp`, default off): Owner-authorized server-centric MCP configuration with safe persistence, read-only tool enumeration cache/freshness, explicit trust-gated connection testing, JSON import preview/explicit registration, filesystem discovery candidates, trash/restore/permanent delete, credential-reference safety (no plaintext secret leakage in observable surfaces), and EN/AR RTL settings UI. Deferred from V1: per-tool runtime enforcement, strict project isolation, and shutdown-persistence enforcement.
+
 Entries written before the rename may use the retired product name (`majed`) and its identifiers; the current names are documented in `docs/ai/rename-waycraft.md`.
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).

@@ -166,9 +166,9 @@ async function directSdkProbe(config: McpServerConfig, opts: McpConnectionTestOp
   try {
     // Installed SDK paths (verified present in repo node_modules).
     const [{ Client }, stdioMod, httpMod] = await Promise.all([
-      import('/Users/majedsiefalnasr/Documents/Work/DeepSeek Harness/dsh-majed/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js'),
-      import('/Users/majedsiefalnasr/Documents/Work/DeepSeek Harness/dsh-majed/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js').catch(() => null),
-      import('/Users/majedsiefalnasr/Documents/Work/DeepSeek Harness/dsh-majed/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js').catch(() => null),
+      import('@modelcontextprotocol/sdk/client/index.js'),
+      import('@modelcontextprotocol/sdk/client/stdio.js').catch(() => null),
+      import('@modelcontextprotocol/sdk/client/streamableHttp.js').catch(() => null),
     ] as any);
     if (config.transport === 'streamable-http') {
       if (!httpMod?.StreamableHTTPClientTransport) return unavailable('Streamable HTTP client transport unavailable', 'capability', started);

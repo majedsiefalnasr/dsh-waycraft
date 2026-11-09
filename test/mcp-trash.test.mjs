@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const worktree = '/Users/majedsiefalnasr/Documents/Work/DeepSeek Harness/dsh-majed/.agents/worktrees/impl/mcp-13';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+const worktree = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = (m) => pathToFileURL(join(worktree, 'dist', m + '.js')).href;
 let ts;
 for (const p of [
@@ -238,12 +240,16 @@ test('#173 operational-safety: test_connection cannot probe trashed entry (not m
   } finally { t.cleanup(); t2.cleanup(); }
 });
 
-test('#173 legacy remove/delete action remains compatible for #165 callers', async () => {
+test('#173/#176 legacy remove/delete alias requires explicit confirmation and deletes only when confirmed', async () => {
   const t = tempStore(BASE);
   try {
     const { route } = makeCtx(t.configPath);
     const fp = (await call(route, { action: 'list' })).json.fingerprint;
-    const r = await call(route, { action: 'delete', serverName: 'github', expectedFingerprint: fp });
+    const noConfirm = await call(route, { action: 'delete', serverName: 'github', expectedFingerprint: fp });
+    assert.equal(noConfirm.status, 409, JSON.stringify(noConfirm.json));
+    assert.equal(noConfirm.json.code, 'confirm_required');
+    const fp2 = (await call(route, { action: 'list' })).json.fingerprint;
+    const r = await call(route, { action: 'delete', serverName: 'github', expectedFingerprint: fp2, confirm: true });
     assert.equal(r.status, 200, JSON.stringify(r.json));
   } finally { t.cleanup(); }
 });

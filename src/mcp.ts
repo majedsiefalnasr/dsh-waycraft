@@ -43,13 +43,14 @@ function isOwnerRequest(request: Request): boolean {
   // Defense in depth. DSH's connection fetch layer owner-gates exact /api routes
   // for non-owner peers before the handler runs; this guard protects against
   // misconfiguration and makes authorization explicit in tests/harnesses.
+  // Fail closed for explicit peer metadata that is not Owner; when no peer metadata
+  // is present, rely on DSH transport owner-gating (primary enforcement).
   const peer = (request as any).peer ?? (request as any).__dshPeer;
   if (peer && typeof peer === 'object') {
     if (peer.owner === true) return true;
     if (peer.role === 'owner') return true;
     if (peer.isOwner === true) return true;
-    if (peer.owner === false || peer.role === 'paired' || peer.isOwner === false)
-      return false;
+    return false;
   }
   return true;
 }
@@ -199,25 +200,16 @@ export function apply(ctx: any, config: Config = {}): void {
           await toolCache.invalidate(serverName, 'restored');
           return json({ ok: true, fingerprint: result.fingerprint, server: result.server, servers: result.servers, trashedServers: result.trashedServers });
         }
-        if (action === 'permanent_delete' || action === 'delete_permanent') {
-          // #173: explicit confirmation required; removes persistent config via supported mechanism.
-          // Respects ownership and avoids auto-deleting shared credentials.
+        if (action === 'permanent_delete' || action === 'delete_permanent' || action === 'remove' || action === 'delete') {
+          // #173/#176: permanent deletion always requires explicit confirmation (spec §250).
+          // `remove`/`delete` remain as compatibility aliases but are never implicit/destructive.
           const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
           if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
-          const result = await store.permanentDelete(serverName, expectedFingerprint, { confirm: body.confirm === true });
-          if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to permanently delete MCP server', { code: result.code, fingerprint: result.fingerprint, limitation: result.limitation });
+          if (body.confirm !== true) return reject(409, 'Explicit confirmation required for permanent delete', { code: 'confirm_required' });
+          const result = await store.permanentDelete(serverName, expectedFingerprint, { confirm: true });
+          if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to delete MCP server', { code: result.code, fingerprint: result.fingerprint, limitation: result.limitation });
           await toolCache.remove(serverName);
-          return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers, trashedServers: result.trashedServers, limitation: result.limitation });
-        }
-        if (action === 'remove' || action === 'delete') {
-          // Backward-compatible path (#165): permanent removal with implicit confirm.
-          // Prefer trash/permanent_delete for new flows.
-          const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
-          if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
-          const result = await store.remove(serverName, expectedFingerprint);
-          if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to remove MCP server', { code: result.code, fingerprint: result.fingerprint });
-          await toolCache.remove(serverName);
-          return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers, trashedServers: result.trashedServers });
+          return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers, trashedServers: result.trashedServers, limitation: result.limitation, removed: true });
         }
         if (action === 'trust_status') {
           const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
