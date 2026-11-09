@@ -18,6 +18,8 @@ export interface McpReconnectConfig {
   [key: string]: unknown;
 }
 
+import { validateCredentialSafety } from './mcp-credentials.js';
+
 /** Normalized server config stored/managed by Waycraft. Unknown fields preserved. */
 export interface McpServerConfig {
   serverName: string;
@@ -175,7 +177,10 @@ export function validateMcpServerConfig(
   if (value.reconnect !== undefined && !isRecord(value.reconnect))
     issues.push({ path: 'reconnect', message: 'reconnect must be an object', code: 'invalid_type' });
 
-  // Credential refs are allowed as ${credential:REF} in command/args/env/url/headers values.
+  // #166: Credential refs are allowed as ${credential:REF}. Never persist plaintext secrets.
+  for (const issue of validateCredentialSafety(value as Record<string, unknown>)) {
+    issues.push({ path: issue.path, message: issue.message, code: 'invalid_value' });
+  }
   return { ok: issues.length === 0, issues, value };
 }
 

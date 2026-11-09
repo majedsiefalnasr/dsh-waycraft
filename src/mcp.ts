@@ -9,6 +9,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { McpCordisConfigStore } from './mcp-config-store.js';
+import { sanitizeMcpObservable } from './mcp-credentials.js';
 
 export const name = 'dsh-waycraft/mcp';
 export const inject = ['connection'] as const;
@@ -20,14 +21,15 @@ const MAX_REQUEST = 64 * 1024;
 export interface Config {}
 
 function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
+  const safe = sanitizeMcpObservable(data);
+  return new Response(JSON.stringify(safe), {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   });
 }
 
 function reject(status: number, message: string, extra?: Record<string, unknown>): Response {
-  return json({ ok: false, error: message, ...(extra || {}) }, status);
+  return json({ ok: false, error: sanitizeMcpObservable(message), ...sanitizeMcpObservable(extra || {}) }, status);
 }
 
 function isOwnerRequest(request: Request): boolean {

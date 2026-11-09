@@ -28,6 +28,7 @@ function ensureBuild(name) {
     writeFileSync(distPath, out);
   })();
 }
+await ensureBuild('mcp-credentials');
 await ensureBuild('mcp-schema');
 await ensureBuild('mcp-config-store');
 await ensureBuild('mcp');
