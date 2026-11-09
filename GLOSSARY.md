@@ -61,3 +61,10 @@ _Avoid_: Subscription account, API connection
 **OpenCode Zen**:
 The OpenCode gateway's free, login-less model lane, offered as a Subscription provider without accounts.
 _Avoid_: OpenCode account, opencode2dsh
+
+## MCP
+
+**MCP manager**:
+The Waycraft component through which the Owner manages MCP servers, their availability in DSH, their sources, and installed copies. (V1: server CRUD, connection testing, read-only tool enumeration, import, discovery, trash/restore; per-tool enforcement and project isolation deferred.)
+_Avoid_: MCP plugin, standalone MCP manager
+
