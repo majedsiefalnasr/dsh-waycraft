@@ -8,6 +8,7 @@ import {
   validateMcpServerConfig,
 } from './mcp-schema.js';
 import { sanitizeMcpObservable, sanitizeMcpServerEntryForSurface } from './mcp-credentials.js';
+import { applyTrustApprovalMeta, detectMaterialChange, emptyTrust, invalidateTrustMeta, reviewedConfigFingerprint, trustFromRowMeta, type McpTrustApproval } from './mcp-trust.js';
 
 const MCP_CLIENT_NAME = '@deepseek-ai/dsh-mcp-client';
 
@@ -20,6 +21,8 @@ export interface McpServerEntry {
   config: McpServerConfig;
   disabled?: boolean;
   ownership: McpServerOwnership;
+  trust: McpTrustApproval;
+  reviewedConfigFingerprint: string;
   rawRow: Record<string, unknown>;
 }
 
@@ -73,6 +76,7 @@ function toEntry(row: Record<string, unknown>): McpServerEntry | null {
   if (!serverName) return null;
   const norm = normalizeMcpServerConfig({ transport: configRaw.transport ?? 'stdio', ...configRaw, serverName });
   const config = (norm.value ?? ({ serverName, transport: 'stdio', ...configRaw } as McpServerConfig));
+  const trust = trustFromRowMeta(row['x-waycraft-mcp'], config);
   return {
     id: typeof row.id === 'string' ? row.id : `mcp-${serverName}`,
     rowName: typeof row.name === 'string' ? row.name : undefined,
@@ -80,6 +84,8 @@ function toEntry(row: Record<string, unknown>): McpServerEntry | null {
     config,
     disabled: typeof row.disabled === 'boolean' ? row.disabled : undefined,
     ownership: ownershipOf(row),
+    trust,
+    reviewedConfigFingerprint: reviewedConfigFingerprint(config),
     rawRow: row,
   };
 }
@@ -112,7 +118,8 @@ function makeRow(serverName: string, config: McpServerConfig, ownership: McpServ
     name: MCP_CLIENT_NAME,
     config: { ...config, serverName },
   };
-  if (ownership === 'waycraft') row['x-waycraft-mcp'] = { owner: 'waycraft', version: 1 };
+  // #167: saving does not imply trust. New/reviewed rows start untrusted.
+  if (ownership === 'waycraft') row['x-waycraft-mcp'] = { owner: 'waycraft', version: 1, trust: emptyTrust('save_does_not_imply_trust') };
   return row;
 }
 
@@ -236,7 +243,12 @@ export class McpCordisConfigStore {
         const merged = { ...cfg, ...patch, serverName };
         const validation = validateMcpServerConfig(merged, { mode: 'update', existingServerName: serverName });
         if (!validation.ok || !validation.value) throw Object.assign(new Error('validation'), { validation });
-        return { ...r, config: { ...cfg, ...validation.value, serverName } };
+        const nextConfig = { ...cfg, ...validation.value, serverName };
+        // #167: material changes invalidate trust; non-material saves preserve existing trust if fingerprint unchanged.
+        const material = detectMaterialChange(cfg, nextConfig);
+        let meta = isRecord(r['x-waycraft-mcp']) ? { ...(r['x-waycraft-mcp'] as Record<string, unknown>) } : { owner: 'waycraft', version: 1 };
+        if (material.changed) meta = invalidateTrustMeta(meta, 'material_change');
+        return { ...r, config: nextConfig, 'x-waycraft-mcp': meta };
       });
       if (!found) return { ok: false, code: 'not_found', message: `Server not found: ${serverName}`, fingerprint: readFp };
       const result = await this.commit(nextRows, readFp, expectedFingerprint);
@@ -264,6 +276,49 @@ export class McpCordisConfigStore {
       const nextRows = rows.filter((row) => !(isMcpClientRow(row) && isRecord((row as any).config) && (row as any).config.serverName === serverName));
       if (nextRows.length === rows.length) return { ok: false, code: 'not_found', message: `Server not found: ${serverName}`, fingerprint: readFp };
       return await this.commit(nextRows, readFp, expectedFingerprint);
+    } catch (err: any) {
+      return { ok: false, code: 'io', message: sanitizeMcpObservable(String(err?.message || 'Operation failed')) as string };
+    }
+  }
+
+  async approveTrust(serverName: string, expectedFingerprint?: string): Promise<McpPersistenceResult> {
+    return this.serialize(() => this.mutateApproveTrust(serverName, expectedFingerprint));
+  }
+
+  private async mutateApproveTrust(serverName: string, expectedFingerprint?: string): Promise<McpPersistenceResult> {
+    try {
+      const file = await readText(this.configPath);
+      const text = file?.text ?? '[]\n';
+      const readFp = fingerprintOf(text);
+      if (expectedFingerprint && expectedFingerprint !== readFp) return this.conflict(text);
+      const doc = parseDocument(text);
+      if (doc.errors?.length) return { ok: false, code: 'parse', message: 'Failed to parse config' };
+      const rows = (doc.toJS() as unknown[]).slice();
+      let found = false;
+      const nextRows = rows.map((row) => {
+        if (!isMcpClientRow(row)) return row;
+        const r = row as Record<string, unknown>;
+        const cfg = isRecord(r.config) ? r.config : {};
+        if (cfg.serverName !== serverName) return row;
+        found = true;
+        const meta = applyTrustApprovalMeta(r['x-waycraft-mcp'], cfg);
+        return { ...r, 'x-waycraft-mcp': meta };
+      });
+      if (!found) return { ok: false, code: 'not_found', message: `Server not found: ${serverName}`, fingerprint: readFp };
+      const result = await this.commit(nextRows, readFp, expectedFingerprint);
+      if (result.ok) { const sv = result.servers?.find((s) => s.serverName === serverName); if (sv) result.server = sanitizeMcpObservable(sv) as McpServerEntry; }
+      return result;
+    } catch (err: any) {
+      return { ok: false, code: 'io', message: sanitizeMcpObservable(String(err?.message || 'Operation failed')) as string };
+    }
+  }
+
+  async trustStatus(serverName: string): Promise<McpPersistenceResult> {
+    try {
+      const snap = await this.snapshot();
+      const server = snap.servers.find((s) => s.serverName === serverName);
+      if (!server) return { ok: false, code: 'not_found', message: `Server not found: ${serverName}`, fingerprint: snap.fingerprint };
+      return { ok: true, fingerprint: snap.fingerprint, server: sanitizeMcpObservable(server) as McpServerEntry };
     } catch (err: any) {
       return { ok: false, code: 'io', message: sanitizeMcpObservable(String(err?.message || 'Operation failed')) as string };
     }
