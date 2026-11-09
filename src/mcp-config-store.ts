@@ -7,6 +7,7 @@ import {
   normalizeMcpServerConfig,
   validateMcpServerConfig,
 } from './mcp-schema.js';
+import { sanitizeMcpObservable, sanitizeMcpServerEntryForSurface } from './mcp-credentials.js';
 
 const MCP_CLIENT_NAME = '@deepseek-ai/dsh-mcp-client';
 
@@ -160,9 +161,9 @@ export class McpCordisConfigStore {
   async list(): Promise<McpPersistenceResult> {
     try {
       const snap = await this.snapshot();
-      return { ok: true, fingerprint: snap.fingerprint, servers: snap.servers };
+      return { ok: true, fingerprint: snap.fingerprint, servers: sanitizeMcpObservable(snap.servers) as McpServerEntry[] };
     } catch (err: any) {
-      return { ok: false, code: err?.code === 'parse' ? 'parse' : 'io', message: String(err?.message || err) };
+      return { ok: false, code: err?.code === 'parse' ? 'parse' : 'io', message: sanitizeMcpObservable(String(err?.message || 'Operation failed')) as string };
     }
   }
 
@@ -180,7 +181,7 @@ export class McpCordisConfigStore {
     if (currentFp !== readFingerprint) return this.conflict(currentText);
     await writeAtomic(this.configPath, next);
     const snap = await this.snapshot();
-    return { ok: true, fingerprint: snap.fingerprint, servers: snap.servers };
+    return { ok: true, fingerprint: snap.fingerprint, servers: sanitizeMcpObservable(snap.servers) as McpServerEntry[] };
   }
 
   async create(input: Record<string, unknown>, expectedFingerprint?: string): Promise<McpPersistenceResult> {
@@ -205,10 +206,10 @@ export class McpCordisConfigStore {
       }
       rows.push(makeRow(validation.value.serverName, validation.value, 'waycraft'));
       const result = await this.commit(rows, readFp, expectedFingerprint);
-      if (result.ok) result.server = result.servers?.find((s) => s.serverName === validation.value!.serverName);
+      if (result.ok) { const sv = result.servers?.find((s) => s.serverName === validation.value!.serverName); if (sv) result.server = sanitizeMcpObservable(sv) as McpServerEntry; }
       return result;
     } catch (err: any) {
-      return { ok: false, code: 'io', message: String(err?.message || err) };
+      return { ok: false, code: 'io', message: sanitizeMcpObservable(String(err?.message || 'Operation failed')) as string };
     }
   }
 
@@ -239,11 +240,11 @@ export class McpCordisConfigStore {
       });
       if (!found) return { ok: false, code: 'not_found', message: `Server not found: ${serverName}`, fingerprint: readFp };
       const result = await this.commit(nextRows, readFp, expectedFingerprint);
-      if (result.ok) result.server = result.servers?.find((s) => s.serverName === serverName);
+      if (result.ok) { const sv = result.servers?.find((s) => s.serverName === serverName); if (sv) result.server = sanitizeMcpObservable(sv) as McpServerEntry; }
       return result;
     } catch (err: any) {
-      if (err?.validation) return { ok: false, code: 'validation', message: 'Invalid server config', issues: err.validation.issues };
-      return { ok: false, code: 'io', message: String(err?.message || err) };
+      if (err?.validation) return { ok: false, code: 'validation', message: 'Invalid server config', issues: sanitizeMcpObservable(err.validation.issues) as any };
+      return { ok: false, code: 'io', message: sanitizeMcpObservable(String(err?.message || 'Operation failed')) as string };
     }
   }
 
@@ -264,7 +265,7 @@ export class McpCordisConfigStore {
       if (nextRows.length === rows.length) return { ok: false, code: 'not_found', message: `Server not found: ${serverName}`, fingerprint: readFp };
       return await this.commit(nextRows, readFp, expectedFingerprint);
     } catch (err: any) {
-      return { ok: false, code: 'io', message: String(err?.message || err) };
+      return { ok: false, code: 'io', message: sanitizeMcpObservable(String(err?.message || 'Operation failed')) as string };
     }
   }
 }

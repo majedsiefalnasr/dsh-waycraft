@@ -1,28 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const distPath = join(here, '../dist/mcp.js');
-const srcPath = join(here, '../src/mcp.ts');
-if (!existsSync(distPath)) {
-  // Minimal TS->JS for this test when dist is not built (mirrors build output shape).
-  let s = readFileSync(srcPath, 'utf8');
-  s = s.replace(/export interface Config \{\}/, 'export const Config = {};');
-  s = s.replace(/export function apply\(ctx: any, _config: Config = \{\}\): void/g, 'export function apply(ctx, _config = {})');
-  s = s.replace(/\(target: any\)/g, '(target)');
-  s = s.replace(/function json\(data: unknown, status = 200\): Response/g, 'function json(data, status = 200)');
-  s = s.replace(/function reject\(status: number, message: string\): Response/g, 'function reject(status, message)');
-  s = s.replace(/function isOwnerRequest\(request: Request\): boolean/g, 'function isOwnerRequest(request)');
-  s = s.replace(/async fetch\(request: Request\)/g, 'async fetch(request)');
-  s = s.replace(/let body: any;/g, 'let body;');
-  s = s.replace(/\(request as any\)/g, '(request)');
-  s = s.replace(/as const/g, '');
-  mkdirSync(join(here, '../dist'), { recursive: true });
-  writeFileSync(distPath, s);
+const distDir = join(here, '../dist');
+async function ensureBuild(name) {
+  const dp = join(distDir, `${name}.js`);
+  const sp = join(here, `../src/${name}.ts`);
+  if (!existsSync(sp)) return;
+  const tsPaths = [
+    '/Users/majedsiefalnasr/Documents/Work/DeepSeek Harness/dsh-majed/.agents/worktrees/impl/146-skill-manager/node_modules/typescript/lib/typescript.js',
+    '/Users/majedsiefalnasr/Documents/Work/DeepSeek Harness/dsh-majed/.agents/worktrees/impl/150-import-uploads/node_modules/typescript/lib/typescript.js',
+  ];
+  let ts;
+  for (const p of tsPaths) { try { ts = (await import(pathToFileURL(p).href)).default; break; } catch {} }
+  if (!ts) return;
+  const src = readFileSync(sp, 'utf8');
+  const out = ts.transpileModule(src, { compilerOptions: { module: 99, target: 99 }, fileName: `${name}.ts` }).outputText;
+  mkdirSync(distDir, { recursive: true });
+  writeFileSync(dp, out);
 }
+await ensureBuild('mcp-credentials');
+await ensureBuild('mcp-schema');
+await ensureBuild('mcp-config-store');
+await ensureBuild('mcp');
+const distPath = join(distDir, 'mcp.js');
 const { apply } = await import('../dist/mcp.js');
 
 const MCP_ROUTE = '/api/waycraft-mcp.manage';
