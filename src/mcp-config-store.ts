@@ -66,7 +66,12 @@ function isMcpClientRow(row: unknown): row is Record<string, unknown> {
 
 function ownershipOf(row: Record<string, unknown>): McpServerOwnership {
   const meta = row['x-waycraft-mcp'];
-  if (isRecord(meta) && meta.owner === 'waycraft') return 'waycraft';
+  if (isRecord(meta)) {
+    const owner = meta.owner;
+    if (owner === 'waycraft') return 'waycraft';
+    if (typeof owner === 'string' && owner && owner !== 'dsh' && owner !== 'preexisting-dsh') return 'other';
+  }
+  // #170: pre-existing DSH/mcp-client rows without Waycraft ownership metadata.
   return 'preexisting-dsh';
 }
 
