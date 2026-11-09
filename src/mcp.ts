@@ -15,6 +15,7 @@ import { testMcpConnection } from './mcp-connection-test.js';
 import { sanitizeMcpObservable } from './mcp-credentials.js';
 import { assertTrustApprovedForAction } from './mcp-trust.js';
 import { McpToolCacheStore, resolveMcpToolCachePath, searchMcpTools } from './mcp-tool-cache.js';
+import { previewMcpImport, registerMcpImport, type McpImportRegisterItem } from './mcp-import.js';
 
 export const name = 'dsh-waycraft/mcp';
 export const inject = ['connection'] as const;
@@ -211,6 +212,38 @@ export function apply(ctx: any, _config: Config = {}): void {
           const cacheEntry = await toolCache.updateFromProbe(serverName, server.config, { ok: test.ok, message: test.message, tools: (test as any).tools, toolNames: test.toolNames, truncated: test.truncated, capability: test.capability });
           // Return actionable success/failure; never expose raw secrets.
           return json({ ok: test.ok, fingerprint: trust.fingerprint, server: sanitizeMcpObservable(server), test: sanitizeMcpObservable(test), toolCache: sanitizeMcpObservable(cacheEntry) }, test.ok ? 200 : 502);
+        }
+        if (action === 'import_preview') {
+          // #171: parse/validate/normalize/preview. Never executes imported servers.
+          if (!body || typeof body !== 'object' || !('input' in body)) return reject(400, 'input required');
+          const input = (body as any).input;
+          const list = await store.list();
+          const preview = previewMcpImport(input, { existingServerNames: list.servers.map((s: any) => s.serverName) });
+          return json({ ok: preview.ok, fingerprint: list.fingerprint, preview: sanitizeMcpObservable(preview) }, preview.ok ? 200 : 400);
+        }
+        if (action === 'import_register') {
+          // #171: explicit registration approval only. No auto-execution, no auto-trust.
+          if (!body || typeof body !== 'object' || !('preview' in body)) return reject(400, 'preview required');
+          const preview = (body as any).preview;
+          const approvals = Array.isArray((body as any).approvals) ? (body as any).approvals as McpImportRegisterItem[] : [];
+          if (!approvals.some((a) => a && a.approved)) return reject(400, 'At least one explicitly approved candidate is required');
+          const result = await registerMcpImport(preview, approvals, {
+            existingServerNames: async () => (await store.list()).servers.map((s: any) => s.serverName),
+            create: async (config) => {
+              const created = await store.create(config);
+              if (created.ok && created.server) await toolCache.invalidate((created.server as any).serverName, 'policy_change');
+              return { ok: !!created.ok, message: created.message, code: created.code };
+            },
+            replace: async (serverName, config) => {
+              // Explicit conflict resolution only. Preserve identity; do not test/connect.
+              const fp = (await store.list()).fingerprint;
+              const updated = await store.update(serverName, config, fp);
+              if (updated.ok) await toolCache.invalidate(serverName, 'config_change');
+              return { ok: !!updated.ok, message: updated.message, code: updated.code };
+            },
+          });
+          const list = await store.list();
+          return json({ ok: result.ok, fingerprint: list.fingerprint, import: sanitizeMcpObservable(result), servers: list.servers }, result.ok ? 200 : 207);
         }
         return reject(400, 'Unknown action');
       },
