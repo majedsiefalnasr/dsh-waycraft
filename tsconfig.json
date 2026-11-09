@@ -23,6 +23,7 @@
     "src/translate/**/*.ts",
     "src/tools/**/*.ts",
     "src/mcp.ts",
-    "src/mcp-schema.ts"
+    "src/mcp-schema.ts",
+    "src/mcp-config-store.ts"
   ]
 }
