@@ -114,8 +114,11 @@ test('#167 integration: explicit connection testing cannot bypass trust approval
     r = await call({ action: 'approve_trust', serverName: 'srv', expectedFingerprint: r.data.fingerprint });
     assert.equal(r.status, 200, JSON.stringify(r.data));
     r = await call({ action: 'test_connection', serverName: 'srv' });
-    assert.equal(r.status, 200, JSON.stringify(r.data)); // gate passed; impl pending #168
-    assert.equal(r.data.test.gatedByTrust, true);
+    // #167 gate passed; #168 performs real explicit test (may fail for fake command, but must not be trust-blocked).
+    assert.notEqual(r.status, 403, JSON.stringify(r.data));
+    assert.notEqual(r.data?.code, 'trust_required');
+    assert.ok(r.data?.test && typeof r.data.test === 'object');
+    assert.equal(r.data.test.capabilityVerified, true);
   } finally { delete process.env.DSH_CORDIS_PATCH_PATH; t.cleanup(); }
 });
 
