@@ -69,15 +69,19 @@ function mapPersistenceStatus(code?: string): number {
     case 'exists': return 409;
     case 'parse': return 422;
     case 'trust_required': return 403;
+    case 'confirm_required': return 409;
+    case 'ownership': return 403;
+    case 'blocked': return 409;
+    case 'trashed': return 409;
     default: return 500;
   }
 }
 
-export function apply(ctx: any, _config: Config = {}): void {
+export function apply(ctx: any, config: Config = {}): void {
   ctx.inject?.(['connection'], (target: any) => {
     const connection = target.get?.('connection');
     if (!connection?.fetch?.register) return;
-    const configPath = resolveCordisPatchPath();
+    const configPath = typeof config?.configPath === 'string' && config.configPath ? config.configPath : resolveCordisPatchPath();
     const store = new McpCordisConfigStore({ configPath });
     const toolCache = new McpToolCacheStore(resolveMcpToolCachePath({ configPath }));
     const dispose = connection.fetch.register({
@@ -109,9 +113,15 @@ export function apply(ctx: any, _config: Config = {}): void {
         }
         if (action === 'list') {
           // #169: read-only listing. Never probes/enumerates tools.
+          // #173: includes trashed entries separately; trashed entries are operationally inactive.
           const result = await store.list();
           if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to list MCP servers', { code: result.code, fingerprint: result.fingerprint });
-          return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers });
+          return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers, trashedServers: result.trashedServers || [] });
+        }
+        if (action === 'list_trash' || action === 'trash_list') {
+          const result = await store.listTrash();
+          if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to list trashed MCP servers', { code: result.code, fingerprint: result.fingerprint });
+          return json({ ok: true, fingerprint: result.fingerprint, trashedServers: result.trashedServers || [] });
         }
         if (action === 'list_tools') {
           // #169: read-only cached enumeration. No eager connections.
@@ -133,10 +143,12 @@ export function apply(ctx: any, _config: Config = {}): void {
         }
         if (action === 'refresh_tools' || action === 'enumerate_tools') {
           // #169: explicit on-demand enumeration only. Trust-gated. Never eager on import/list.
+          // #173: trashed entries are operationally inactive; do not connect/probe.
           const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
           if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
           const trust = await store.trustStatus(serverName);
           if (!trust.ok || !trust.server) return reject(mapPersistenceStatus(trust.code), trust.message || 'Failed to get trust status', { code: trust.code, fingerprint: trust.fingerprint });
+          if ((trust.server as any).trash?.trashed) return reject(409, `Server is in trash and operationally inactive: ${serverName}`, { code: 'trashed', fingerprint: trust.fingerprint });
           try { assertTrustApprovedForAction((trust.server as any).trust, 'refresh_tools'); } catch (err: any) {
             return reject(403, err.message, { code: err.code || 'trust_required', trust: err.trust, fingerprint: trust.fingerprint });
           }
@@ -167,13 +179,45 @@ export function apply(ctx: any, _config: Config = {}): void {
           await toolCache.invalidate(serverName, 'config_scope_or_policy_changed');
           return json({ ok: true, fingerprint: result.fingerprint, server: result.server, servers: result.servers });
         }
+        if (action === 'trash' || action === 'move_to_trash') {
+          // #173: move to trash (operationally inactive, removed from active list, preserved for restore).
+          // Not cosmetic: store sets disabled + trash metadata; ownership limitations documented.
+          const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
+          if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
+          const result = await store.moveToTrash(serverName, expectedFingerprint);
+          if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to move MCP server to trash', { code: result.code, fingerprint: result.fingerprint, limitation: result.limitation });
+          await toolCache.invalidate(serverName, 'trashed');
+          return json({ ok: true, fingerprint: result.fingerprint, server: result.server, servers: result.servers, trashedServers: result.trashedServers, limitation: result.limitation });
+        }
+        if (action === 'restore' || action === 'restore_trash') {
+          // #173: restore revalidates identity/conflicts, credential refs, trust requirements.
+          // Default restored state is non-running/disabled; trust requires revalidation.
+          const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
+          if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
+          const result = await store.restore(serverName, expectedFingerprint);
+          if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to restore MCP server', { code: result.code, fingerprint: result.fingerprint, issues: result.issues, limitation: result.limitation });
+          await toolCache.invalidate(serverName, 'restored');
+          return json({ ok: true, fingerprint: result.fingerprint, server: result.server, servers: result.servers, trashedServers: result.trashedServers });
+        }
+        if (action === 'permanent_delete' || action === 'delete_permanent') {
+          // #173: explicit confirmation required; removes persistent config via supported mechanism.
+          // Respects ownership and avoids auto-deleting shared credentials.
+          const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
+          if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
+          const result = await store.permanentDelete(serverName, expectedFingerprint, { confirm: body.confirm === true });
+          if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to permanently delete MCP server', { code: result.code, fingerprint: result.fingerprint, limitation: result.limitation });
+          await toolCache.remove(serverName);
+          return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers, trashedServers: result.trashedServers, limitation: result.limitation });
+        }
         if (action === 'remove' || action === 'delete') {
+          // Backward-compatible path (#165): permanent removal with implicit confirm.
+          // Prefer trash/permanent_delete for new flows.
           const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
           if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
           const result = await store.remove(serverName, expectedFingerprint);
           if (!result.ok) return reject(mapPersistenceStatus(result.code), result.message || 'Failed to remove MCP server', { code: result.code, fingerprint: result.fingerprint });
           await toolCache.remove(serverName);
-          return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers });
+          return json({ ok: true, fingerprint: result.fingerprint, servers: result.servers, trashedServers: result.trashedServers });
         }
         if (action === 'trust_status') {
           const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
@@ -196,10 +240,12 @@ export function apply(ctx: any, _config: Config = {}): void {
           // #167/#168: explicit connection testing cannot bypass required trust approval.
           // No auto-test on import/create (action is explicit only).
           // #169: explicit test refreshes enumeration cache on success/failure.
+          // #173: trashed entries are operationally inactive; do not connect/probe.
           const serverName = typeof body.serverName === 'string' ? body.serverName : body.config?.serverName;
           if (typeof serverName !== 'string' || !serverName) return reject(400, 'serverName required');
           const trust = await store.trustStatus(serverName);
           if (!trust.ok || !trust.server) return reject(mapPersistenceStatus(trust.code), trust.message || 'Failed to get trust status', { code: trust.code, fingerprint: trust.fingerprint });
+          if ((trust.server as any).trash?.trashed) return reject(409, `Server is in trash and operationally inactive: ${serverName}`, { code: 'trashed', fingerprint: trust.fingerprint });
           try { assertTrustApprovedForAction((trust.server as any).trust, 'test_connection'); } catch (err: any) {
             return reject(403, err.message, { code: err.code || 'trust_required', trust: err.trust, fingerprint: trust.fingerprint });
           }
