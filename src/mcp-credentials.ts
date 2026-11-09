@@ -125,6 +125,7 @@ export function sanitizeMcpServerEntryForSurface<T extends Record<string, unknow
     out.rawRow = row;
   }
   if (Array.isArray(out.servers)) out.servers = out.servers.map((s) => s && typeof s === 'object' ? sanitizeMcpServerEntryForSurface(s as any) : s);
+  if (Array.isArray(out.trashedServers)) out.trashedServers = out.trashedServers.map((s) => s && typeof s === 'object' ? sanitizeMcpServerEntryForSurface(s as any) : s);
   if (out.server && typeof out.server === 'object') out.server = sanitizeMcpServerEntryForSurface(out.server as any);
   return out as T;
 }
