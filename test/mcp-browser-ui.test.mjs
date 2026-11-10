@@ -129,10 +129,9 @@ test('#174 browser integration EN: server-centric UI renders, read-only tools, a
   const text = allText(json);
   assert.match(text, /MCP servers/);
   assert.match(text, /demo/);
-  assert.match(text, /Move to Trash/);
-  assert.match(text, /No Global\/Project scope selectors in V1\./);
-  assert.match(text, /disconnected\/untested server is not implied to be permanently disabled/i);
-  assert.match(text, /does not claim runtime tool enforcement guarantees/i);
+  assert.ok(findButton(renderer.toJSON(), /^Move to Trash$/), 'Move to Trash action is on the row');
+  assert.doesNotMatch(text, /scope selector/i);
+  assert.doesNotMatch(text, /About this manager/);
   // Trash lifecycle labels present in EN dictionary; read-only/per-tool note is in Tools tab.
   const { applyMcp } = loadMcpBrowser();
   const { ctx, sections, dictionaries } = makeCtx({ lang: 'en', fetchImpl: async () => jsonResponse(sampleData()) });
@@ -170,8 +169,8 @@ test('#174 browser integration AR: Arabic RTL, translated labels, technical LTR 
   const json = renderer.toJSON();
   const text = allText(json);
   assert.match(text, /خوادم MCP/);
-  assert.match(text, /نقل إلى سلة المهملات/); // active server action
-  assert.match(text, /لا توجد محددات نطاق عام\/مشروع/);
+  assert.ok(findButton(renderer.toJSON(), /^نقل إلى سلة المهملات$/), 'Trash action is on the row');
+  assert.doesNotMatch(text, /محددات نطاق/);
   // Accurate trash lifecycle labels are present in Arabic dictionary (Restore/Permanent delete shown in trash view).
   const arDict = dictionaries.find(d => d.ns === 'waycraft.mcp')?.dicts?.ar || {};
   assert.equal(arDict.restore, 'استعادة');
@@ -214,7 +213,7 @@ test('#174 unauthorized state shown for non-owner responses', async () => {
 });
 
 function findButton(rootJson, textRe) {
-  return findAll(rootJson, n => n.type === 'button' && textRe.test(allText(n)))[0];
+  return findAll(rootJson, n => n.type === 'button' && (textRe.test(allText(n)) || textRe.test(String(n.props?.['aria-label'] || ''))))[0];
 }
 function findTextarea(rootJson, labelRe) {
   // textarea may follow label text in our structure; find first textarea
@@ -421,7 +420,7 @@ test('#174 A EN: create sends the host-shaped config with the current fingerprin
 test('#174 A EN: edit keeps serverName read-only and sends only changed fields via update', async () => {
   formRpcCalls.length = 0;
   const renderer = await mountPanel('en', formFetch());
-  const editBtn = findAll(renderer.toJSON(), n => n.type === 'button' && allText(n) === 'Edit')[0];
+  const editBtn = findAll(renderer.toJSON(), n => n.type === 'button' && (allText(n) === 'Edit' || n.props?.['aria-label'] === 'Edit'))[0];
   assert.ok(editBtn, 'Edit button missing on server row');
   await clickNode(editBtn);
   assert.match(allText(renderer.toJSON()), /Edit MCP server/);
@@ -534,7 +533,7 @@ test('#174 A AR: add form shows Arabic inline errors and blocks create on invali
 test('#174 A AR: edit keeps serverName read-only and sends update without serverName', async () => {
   formRpcCalls.length = 0;
   const renderer = await mountPanel('ar', formFetch());
-  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && allText(n) === 'تعديل')[0]);
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && (allText(n) === 'تعديل' || n.props?.['aria-label'] === 'تعديل'))[0]);
   assert.match(allText(renderer.toJSON()), /تعديل خادم MCP/);
   const nameInput = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.value === 'demo')[0];
   assert.equal(nameInput.props.disabled, true);
@@ -606,7 +605,7 @@ test('#174 P1-2 EN: conflict reloads the panel, keeps typed values, and retries 
     return jsonResponse({ ok: true, fingerprint: fp, servers: sampleData().servers });
   };
   const renderer = await mountPanel('en', fetchImpl);
-  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && allText(n) === 'Edit')[0]);
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && (allText(n) === 'Edit' || n.props?.['aria-label'] === 'Edit'))[0]);
   await setInput(findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.inputMode === 'numeric')[1], '45000');
   await clickNode(saveButton(renderer));
   await flush();
@@ -632,7 +631,7 @@ test('#174 P1-3 EN: saved [REDACTED] secrets are kept, never sent, and a typed [
     if (body.action === 'list') return jsonResponse(redactedData);
     return jsonResponse({ ok: true, fingerprint: 'fp1', servers: redactedData.servers });
   });
-  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && allText(n) === 'Edit')[0]);
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && (allText(n) === 'Edit' || n.props?.['aria-label'] === 'Edit'))[0]);
   // Stdio form order: args (textarea 0), env (textarea 1).
   const env = findAll(renderer.toJSON(), n => n.type === 'textarea')[1];
   assert.equal(env.props.disabled, true, 'env with a kept secret is read-only');

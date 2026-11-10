@@ -31,8 +31,14 @@ describe('MCP manager in a real browser', { skip }, () => {
 
   test('expanding a row reveals its actions; switch is a real switch', async () => {
     const page = await open();
+    // Quick actions and the switch live in the collapsed row; expanding adds only the detail tabs.
+    for (const name of ['Test connection', 'Edit', 'Move to Trash']) {
+      assert.ok(await page.getByRole('button', { name }).first().isVisible(), `${name} is in the collapsed row`);
+    }
     await page.locator('.waycraft-mcp-row-toggle').first().click();
-    assert.ok(await page.getByRole('button', { name: 'Test connection' }).isVisible());
+    assert.equal(await page.getByRole('button', { name: 'Edit' }).count(), 3, 'Edit exists once per row, not again in the details');
+    assert.ok(await page.getByRole('tab', { name: 'Configuration' }).isVisible());
+    assert.equal(await page.locator('.waycraft-mcp-about').count(), 0);
     assert.equal(await page.getByRole('switch').first().getAttribute('role'), 'switch');
     await page.close();
   });
@@ -52,7 +58,6 @@ describe('MCP manager in a real browser', { skip }, () => {
 
   test('Move to Trash asks in a modal dialog, Escape cancels and returns focus, confirming shows a toast', async () => {
     const page = await open();
-    await page.locator('.waycraft-mcp-row-toggle').first().click();
     const opener = page.locator('.waycraft-mcp-danger').first();
     await opener.click();
     assert.ok(await page.locator('[role=alertdialog]').isVisible());

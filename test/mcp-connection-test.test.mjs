@@ -181,3 +181,10 @@ test('#168 uses ctx.mcpManager.probe when available (capability verified) and fa
   assert.equal(fallback.capability, 'direct-mcp-sdk'); // because probeServer not exported in installed version
   assert.equal(fallback.capabilityVerified, true);
 });
+
+test('an uninjected mcpManager service does not make the probe throw', async () => {
+  const ctx = new Proxy({}, { get(_, k) { if (k === 'mcpManager') throw new Error('cannot get property "mcpManager" without inject'); return undefined; } });
+  const r = await testMcpConnection('x', { serverName: 'x', transport: 'stdio', command: 'sh', args: ['-c', 'exit 1'] }, { ctx, timeoutMs: 3000 });
+  assert.equal(r.ok, false);
+  assert.ok(r.message);
+});

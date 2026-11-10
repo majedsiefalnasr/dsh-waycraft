@@ -242,12 +242,12 @@ export function apply(ctx: any, config: Config = {}): void {
             return reject(403, err.message, { code: err.code || 'trust_required', trust: err.trust, fingerprint: trust.fingerprint });
           }
           const server = trust.server as any;
-          const test = await testMcpConnection(serverName, server.config, {
+          const test: any = await testMcpConnection(serverName, server.config, {
             ctx,
             timeoutMs: typeof body.timeoutMs === 'number' ? body.timeoutMs : undefined,
             maxPages: typeof body.maxPages === 'number' ? body.maxPages : undefined,
             maxToolNames: typeof body.maxToolNames === 'number' ? body.maxToolNames : undefined,
-          });
+          }).catch((err: any) => ({ ok: false, stage: 'connect', message: String(err?.message || 'Connection test failed'), durationMs: 0, capability: 'none', capabilityVerified: false }));
           const cacheEntry = await toolCache.updateFromProbe(serverName, server.config, { ok: test.ok, message: test.message, tools: (test as any).tools, toolNames: test.toolNames, truncated: test.truncated, capability: test.capability });
           // Return actionable success/failure; never expose raw secrets.
           return json({ ok: test.ok, fingerprint: trust.fingerprint, server: sanitizeMcpObservable(server), test: sanitizeMcpObservable(test), toolCache: sanitizeMcpObservable(cacheEntry) }, test.ok ? 200 : 502);

@@ -35,7 +35,14 @@ function unavailable(message, stage = 'capability', started = now()) {
     return { ok: false, stage, message: safeText(message), durationMs: now() - started, capability: 'unavailable', capabilityVerified: false };
 }
 async function tryMcpManagerProbe(serverName, opts, started) {
-    const mgr = opts.ctx?.mcpManager ?? opts.ctx?.get?.('mcpManager');
+    // The component does not inject mcpManager; reading an uninjected Cordis service throws, which is "not available" here.
+    let mgr;
+    try {
+        mgr = opts.ctx?.mcpManager ?? opts.ctx?.get?.('mcpManager');
+    }
+    catch {
+        mgr = undefined;
+    }
     if (!mgr || typeof mgr.probe !== 'function')
         return null;
     try {
