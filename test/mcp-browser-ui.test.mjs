@@ -70,6 +70,9 @@ function makeCtx({ lang = 'en', fetchImpl } = {}) {
   return { ctx, sections, dictionaries };
 }
 
+// The settings section registers only after the host status probe answers (presence gate).
+async function settle() { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0)); }
+
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
@@ -110,6 +113,7 @@ async function renderPanel(lang) {
   const { applyMcp } = loadMcpBrowser();
   const { ctx, sections } = makeCtx({ lang, fetchImpl: async () => jsonResponse(sampleData()) });
   applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  await settle();
   assert.equal(sections.length, 1);
   assert.equal(sections[0].spec.id, 'waycraft-mcp');
   assert.equal(sections[0].spec.order, 92);
@@ -120,6 +124,7 @@ async function renderPanel(lang) {
 
 test('#174 browser integration EN: server-centric UI renders, read-only tools, accurate trash labels, no scope/per-tool controls', async () => {
   const renderer = await renderPanel('en');
+  await expandFirst(renderer);
   const json = renderer.toJSON();
   const text = allText(json);
   assert.match(text, /MCP servers/);
@@ -132,11 +137,13 @@ test('#174 browser integration EN: server-centric UI renders, read-only tools, a
   const { applyMcp } = loadMcpBrowser();
   const { ctx, sections, dictionaries } = makeCtx({ lang: 'en', fetchImpl: async () => jsonResponse(sampleData()) });
   applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  await settle();
   const enDict = dictionaries.find(d => d.ns === 'waycraft.mcp')?.dicts?.en || {};
   assert.equal(enDict.restore, 'Restore');
   assert.equal(enDict.permanentDelete, 'Permanently delete');
   assert.match(enDict.readOnlyTools, /Read-only\. No per-tool enable\/disable controls in V1\./);
   let r2; await act(async () => { r2 = Renderer.create(React.createElement(sections[0].component)); await Promise.resolve(); await Promise.resolve(); });
+  await expandFirst(r2);
   const toolsTab = findAll(r2.toJSON(), n => n.type === 'button' && n.props?.role === 'tab' && allText(n) === 'Tools')[0];
   assert.ok(toolsTab);
   await act(async () => { toolsTab.props.onClick(); await Promise.resolve(); });
@@ -156,8 +163,10 @@ test('#174 browser integration AR: Arabic RTL, translated labels, technical LTR 
   const { applyMcp } = loadMcpBrowser();
   const { ctx, sections, dictionaries } = makeCtx({ lang: 'ar', fetchImpl: async () => jsonResponse(sampleData()) });
   applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  await settle();
   let renderer;
   await act(async () => { renderer = Renderer.create(React.createElement(sections[0].component)); await Promise.resolve(); await Promise.resolve(); });
+  await expandFirst(renderer);
   const json = renderer.toJSON();
   const text = allText(json);
   assert.match(text, /خوادم MCP/);
@@ -197,6 +206,7 @@ test('#174 unauthorized state shown for non-owner responses', async () => {
   const { applyMcp } = loadMcpBrowser();
   const { ctx, sections } = makeCtx({ fetchImpl: async () => jsonResponse({ ok:false, error:'Owner authorization required' }, 403) });
   applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  await settle();
   let renderer;
   await act(async () => { renderer = Renderer.create(React.createElement(sections[0].component)); await Promise.resolve(); await Promise.resolve(); });
   assert.match(allText(renderer.toJSON()), /Owner authorization required/);
@@ -243,6 +253,7 @@ test('#175 browser integration EN: discovery/import candidates require explicit 
     return jsonResponse({ ok: true });
   }});
   applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  await settle();
   let renderer;
   await act(async () => { renderer = Renderer.create(React.createElement(sections[0].component)); await Promise.resolve(); await Promise.resolve(); });
 
@@ -314,6 +325,7 @@ test('#175 browser integration AR: discovery/import/trash labels RTL with LTR te
     return jsonResponse({ ok: true, fingerprint: 'fp1' });
   }});
   applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  await settle();
   let renderer;
   await act(async () => { renderer = Renderer.create(React.createElement(sections[0].component)); await Promise.resolve(); await Promise.resolve(); });
   const container = findAll(renderer.toJSON(), n => n.props?.['data-waycraft-mcp-ui'] === '175')[0];
@@ -347,12 +359,22 @@ async function mountPanel(lang, fetchImpl, { host, createNodeMock } = {}) {
   const { applyMcp } = loadMcpBrowser(host);
   const { ctx, sections } = makeCtx({ lang, fetchImpl });
   applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  await settle();
   let renderer;
   await act(async () => { renderer = Renderer.create(React.createElement(sections[0].component), createNodeMock ? { createNodeMock } : undefined); await Promise.resolve(); await Promise.resolve(); });
+  // Rows start collapsed; open the first so its actions are reachable, like a user would.
+  const toggle = findAll(renderer.toJSON(), n => n.type === 'button' && n.props?.['aria-expanded'] === false)[0];
+  if (toggle) await act(async () => { toggle.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
   return renderer;
 }
 const setInput = async (node, value) => act(async () => { node.props.onInput({ target: { value } }); await Promise.resolve(); });
 const clickNode = async (node) => act(async () => { node.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
+// Server rows start collapsed (like the Skill manager sources); actions live in the expanded row.
+const expandFirst = async (renderer) => {
+  const toggle = findAll(renderer.toJSON(), n => n.type === 'button' && n.props?.['aria-expanded'] === false)[0];
+  assert.ok(toggle, 'server row toggle missing');
+  await act(async () => { toggle.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
+};
 const dialogOf = (r) => findAll(r.toJSON(), n => n.props?.role === 'dialog')[0];
 
 test('#174 A EN: add form validates required fields inline and does not call create on invalid input', async () => {
@@ -785,4 +807,13 @@ test('#174 P3 EN: validation issue paths render as LTR technical tokens in the s
   assert.match(alertsText(renderer), /config\.command: Required/);
   assert.ok(findAll(renderer.toJSON(), n => n.type === 'bdi' && allText(n) === 'config.command').length > 0);
   renderer.unmount();
+});
+
+test('presence gate: no section while the component route answers 404 (waycraft-mcp disabled); section appears once it answers', async () => {
+  let enabled = false;
+  const { ctx, sections } = makeCtx({ lang: 'en', fetchImpl: async () => (enabled ? jsonResponse(sampleData()) : jsonResponse({}, 404)) });
+  const { applyMcp } = loadMcpBrowser();
+  applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  await settle();
+  assert.equal(sections.length, 0, 'disabled component must not register a settings section');
 });

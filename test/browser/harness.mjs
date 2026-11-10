@@ -54,7 +54,7 @@ export async function launch() {
   }
 }
 
-function bundleReact() {
+export function bundleReact() {
   const entry = join(ROOT, '.browser-entry.tmp.js');
   const out = join(tmpdir(), `waycraft-browser-react-${process.pid}.js`);
   execFileSync('node', [
@@ -76,7 +76,7 @@ function bundleReact() {
   return readFileSync(out, 'utf8');
 }
 
-const THEME = `:root{--dsw-alias-label-primary:#111;--dsw-alias-label-secondary:#555;--dsw-alias-border-l2:#ddd;--dsw-alias-border-l3:#ccc;--dsw-alias-bg-layer-1:#fff;--dsw-alias-bg-layer-2:#f6f6f6;--dsw-alias-brand-primary:#6b26d9;--dsw-alias-switch-thumb:#fff;--dsw-alias-label-primary-foreground:#fff}body{font:14px system-ui;color:#111}`;
+export const THEME = `:root{--dsw-alias-label-primary:#111;--dsw-alias-label-secondary:#555;--dsw-alias-border-l2:#ddd;--dsw-alias-border-l3:#ccc;--dsw-alias-bg-layer-1:#fff;--dsw-alias-bg-layer-2:#f6f6f6;--dsw-alias-brand-primary:#6b26d9;--dsw-alias-switch-thumb:#fff;--dsw-alias-label-primary-foreground:#fff}body{font:14px system-ui;color:#111}`;
 
 /** Start the harness server; returns `{ url(lang), close() }`. */
 export async function startServer() {
