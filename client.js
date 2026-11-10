@@ -4504,7 +4504,7 @@ ${R} :is(input[type="text"], input[type="number"], input[type="email"], input[ty
           console.error('dsh-waycraft: Skill manager setup failed', error);
         }
         try {
-          subscriptions.applyMcp(ctx);
+          mcp.applyMcp(ctx);
         } catch (error) {
           console.error('dsh-waycraft: MCP manager setup failed', error);
         }
