@@ -16,6 +16,77 @@ export function applyMcp(root: any): void {
 const MCP_ROUTE = '/api/waycraft-mcp.manage';
 const MCP_HEADER = 'x-waycraft-mcp';
 const NS = 'waycraft.mcp';
+// Client-side mirrors of the host rules in mcp-schema.ts and mcp-credentials.ts. The browser bundle
+// cannot import host modules, so these only give immediate feedback; the host stays authoritative.
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const CREDENTIAL_REF = /\$\{credential:[^}]+\}/;
+const SENSITIVE_KEY = /(token|secret|password|passwd|api.?key|apikey|auth|authorization|cookie|credential|bearer|private.?key|access.?key|client.?secret|session)/i;
+const SECRET_VALUE = /(sk-[A-Za-z0-9]{12,}|gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|AIza[0-9A-Za-z\-_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|Bearer\s+[A-Za-z0-9\-._~+/]+=*|Basic\s+[A-Za-z0-9+/]+=+)/;
+const REDACTED = '[REDACTED]';
+/** True when a value would be stored as plaintext: not a ${credential:REF} and sensitive by key or secret-shaped. */
+function isPlainSecret(key: string, value: string): boolean {
+  return !CREDENTIAL_REF.test(value) && (SENSITIVE_KEY.test(key) || SECRET_VALUE.test(value));
+}
+// Regex, not URL: the browser sandbox does not always expose the URL global. The host stays authoritative.
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\/[^\s/?#]+(?:[/?#]\S*)?$/i.test(value);
+}
+// Exact-name matches only: a query parameter or option flag whose literal value is a secret.
+const SENSITIVE_QUERY = /^(token|key|secret|password|passwd|pwd|auth|api_key|apikey|access_token|client_secret|sig|signature)$/i;
+const SENSITIVE_FLAG = /^--?(?:[a-z0-9]+[-_])*(token|secret|password|passwd|pwd|auth|api[-_]?key|access[-_]?key|client[-_]?secret)$/i;
+// Technical tokens that stay LTR inside English and Arabic help text and messages.
+const TECH_TOKEN = /(\$\{credential:[^}]*\}|\[REDACTED\]|KEY=VALUE|Name: value|مفتاح=قيمة|اسم: قيمة)/;
+// Field errors shown as soon as the value is entered, not only after blur or Save.
+const IMMEDIATE_ERRORS = ['errSecretLiteral', 'errSecretUrl', 'errSecretArg', 'errRedactedLiteral'];
+function safeDecode(value: string): string {
+  try { return decodeURIComponent(value); } catch { return value; }
+}
+/** Copy of a URL for display: userinfo and sensitive query values are masked; ${credential:REF} is kept. */
+function maskUrl(url: string): string {
+  return url
+    .replace(/^(https?:\/\/)([^\/?#]*)@/i, (m, scheme, userinfo) => (CREDENTIAL_REF.test(safeDecode(userinfo)) ? m : `${scheme}${REDACTED}@`))
+    .replace(/([?&])([^=&#]+)=([^&#]*)/g, (m, sep, name, value) => (SENSITIVE_QUERY.test(name) && value && !CREDENTIAL_REF.test(safeDecode(value)) ? `${sep}${name}=${REDACTED}` : m));
+}
+/** True when a URL would store a secret: userinfo, a sensitive query value, or a secret-shaped literal. */
+function urlHasSecret(url: string): boolean {
+  return maskUrl(url) !== url || (SECRET_VALUE.test(url) && !CREDENTIAL_REF.test(url));
+}
+/** Copy of args for display: secret-shaped literals and literal values after a sensitive flag are masked. */
+function maskArgs(args: string[]): string[] {
+  const literal = (v: string) => v !== '' && !v.startsWith('-') && !CREDENTIAL_REF.test(v);
+  return args.map((arg, i) => {
+    const eq = arg.indexOf('=');
+    if (arg.startsWith('-') && eq > 0 && SENSITIVE_FLAG.test(arg.slice(0, eq)) && literal(arg.slice(eq + 1))) return `${arg.slice(0, eq)}=${REDACTED}`;
+    if (i > 0 && SENSITIVE_FLAG.test(args[i - 1]) && literal(arg)) return REDACTED;
+    if (!CREDENTIAL_REF.test(arg) && SECRET_VALUE.test(arg)) return REDACTED;
+    return arg;
+  });
+}
+function argsHaveSecret(args: string[]): boolean {
+  return maskArgs(args).some((a, i) => a !== args[i]);
+}
+/** Saved values the host masked as [REDACTED], counted per config key. Host list output masks them. */
+function keptSecrets(original: any): Record<string, number> {
+  const c = original?.config || {};
+  const count = (values: any[]) => values.filter(v => v === REDACTED).length;
+  return {
+    env: count(Object.values(c.env || {})),
+    headers: count(Object.values(c.headers || {})),
+    args: count(Array.isArray(c.args) ? c.args : []),
+    url: c.url === REDACTED ? 1 : 0,
+    command: c.command === REDACTED ? 1 : 0,
+  };
+}
+/** Copy of a config for display only: plaintext secrets in env, headers, args and the URL are masked. */
+function redactForPreview(config: any): any {
+  const mask = (map: Record<string, string> | undefined) => map ? Object.fromEntries(Object.entries(map).map(([k, v]) => [k, isPlainSecret(k, v) ? REDACTED : v])) : map;
+  return {
+    ...config,
+    url: config.url === undefined ? undefined : maskUrl(config.url),
+    args: config.args === undefined ? undefined : maskArgs(config.args),
+    env: mask(config.env), headers: mask(config.headers),
+  };
+}
 
 function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   const effect = (run: () => any, label: string) => {
@@ -79,7 +150,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     configuration: 'Configuration',
     security: 'Security & activity',
     status: 'Status',
-    connectionState: 'Connection (observed)',
+    savedState: 'Saved',
+    runtimeState: 'Runtime application',
     trustState: 'Trust',
     ownership: 'Ownership',
     transport: 'Transport',
@@ -115,13 +187,12 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     save: 'Save',
     serverName: 'Server name',
     command: 'Command',
-    args: 'Arguments (JSON array)',
+    args: 'Arguments',
     url: 'URL',
     cwd: 'Working directory',
     limitation: 'Limitation',
     trashedAt: 'Moved to Trash',
     fingerprint: 'Reviewed fingerprint',
-    conflict: 'Configuration changed externally. Reload before saving.',
     opSuccess: 'Done.',
     opFailed: 'Action failed.',
     ownershipWaycraft: 'Waycraft-managed',
@@ -131,6 +202,69 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     tabs: 'Server details',
     serverList: 'MCP server list',
     trashList: 'Trashed MCP servers',
+    refreshAria: 'Refresh servers',
+    editServer: 'Edit',
+    addTitle: 'Add MCP server',
+    editTitle: 'Edit MCP server',
+    formNote: 'Saving stores the configuration only. It does not trust, connect or start the server. Review and approve the saved config, then test the connection separately.',
+    transportLabel: 'Transport',
+    transportStdio: 'Local command (stdio)',
+    transportHttp: 'Remote URL (streamable HTTP)',
+    nameHelp: 'Letters, digits, dot, underscore or hyphen; starts with a letter or digit. Cannot be changed after creation.',
+    nameLocked: 'Server name is fixed after creation.',
+    argsHelp: 'One argument per line. Arguments containing spaces are kept as typed.',
+    errCleared: 'Removing a saved value is not supported yet. Enter a new value or keep the saved one.',
+    noChanges: 'No changes to save.',
+    saveDone: 'Configuration saved. Review and approve it, then test the connection separately.',
+    envHelp: 'One KEY=VALUE per line. Store secrets as ${credential:REF} references, not plain values.',
+    headersHelp: 'One Name: value per line. Store secrets as ${credential:REF} references, not plain values.',
+    advanced: 'Advanced',
+    startupTimeoutMs: 'Startup timeout (ms)',
+    toolCallTimeoutMs: 'Tool call timeout (ms)',
+    preview: 'Config preview',
+    saveServer: 'Save configuration',
+    saving: 'Saving…',
+    errRequired: 'Required.',
+    errNameInvalid: 'Use letters, digits, dot, underscore or hyphen; start with a letter or digit (max 128).',
+    errUrlInvalid: 'Enter a valid http:// or https:// URL.',
+    errLineInvalid: 'Use KEY=VALUE on each line.',
+    errHeaderInvalid: 'Use Name: value on each line.',
+    errTimeoutInvalid: 'Enter a whole number of milliseconds (0 or more).',
+    errSecretLiteral: 'This looks like a plaintext secret. Replace it with a ${credential:REF} reference before saving.',
+    errSecretUrl: 'The URL contains a password, token or other secret. Use a ${credential:REF} reference instead.',
+    errSecretArg: 'An argument looks like a plaintext secret. Replace it with a ${credential:REF} reference before saving.',
+    errRedactedLiteral: 'The placeholder [REDACTED] is not a value. Enter a ${credential:REF} reference instead.',
+    keptNote: 'saved secret value(s) kept as stored.',
+    conflictReloaded: 'Configuration changed on disk - reloaded; review and save again.',
+    importPartialWarning: 'Registration finished with issues: some candidates were skipped, rejected or failed. Review the result below.',
+    errExists: 'A server with this name already exists. Choose another name.',
+    envLabel: 'Environment (KEY=VALUE)',
+    headersLabel: 'Headers (Name: value)',
+    errCommandRequired: 'Command is required for local (stdio) servers.',
+    errUrlRequired: 'URL is required for remote (HTTP) servers.',
+    formInvalid: 'Fix the highlighted fields before saving.',
+    dirtyCancel: 'Discard unsaved changes?',
+    discard: 'Discard',
+    keepEditing: 'Keep editing',
+    statusSaved: 'Saved to configuration',
+    statusNotSaved: 'Not saved',
+    statusRestart: 'Restart may be required — runtime application not verified',
+    statusRestartNote: 'Waycraft saves the config; it cannot confirm the running DSH runtime has picked it up.',
+    testNever: 'Not tested in this session',
+    testBadgeNever: 'Not tested',
+    testPassed: 'Test passed',
+    testFailed: 'Test failed',
+    testOutcome: 'Test result',
+    testPendingNote: 'Run Test connection to check the server. A test does not approve trust.',
+    configOff: 'Configured off',
+    configOffHelp: 'This switch only records the config flag. DSH runtime enforcement is not verified, so the server may still run.',
+    importResultRegistered: 'Registered {n} server(s).',
+    importResultReplaced: 'Replaced {n} existing server(s).',
+    importResultSkipped: 'Skipped {n} because a server with that name already exists. Choose Replace to overwrite it.',
+    importResultRejected: 'Rejected {n} candidate(s) that failed validation.',
+    importResultFailed: 'Failed {n} candidate(s) with an error.',
+    importResultNone: 'Nothing was registered.',
+    importResultNote: 'Registration does not trust or start any server. Review and test them separately.',
   };
   const ar = {
     title: 'خوادم MCP',
@@ -186,7 +320,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     configuration: 'الإعدادات',
     security: 'الأمان والنشاط',
     status: 'الحالة',
-    connectionState: 'الاتصال (مُلاحظ)',
+    savedState: 'الحفظ',
+    runtimeState: 'تطبيق وقت التشغيل',
     trustState: 'الثقة',
     ownership: 'الملكية',
     transport: 'النقل',
@@ -222,13 +357,12 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     save: 'حفظ',
     serverName: 'اسم الخادم',
     command: 'الأمر',
-    args: 'المعاملات (مصفوفة JSON)',
+    args: 'المعاملات',
     url: 'الرابط',
     cwd: 'مجلد العمل',
     limitation: 'قيد',
     trashedAt: 'نُقل إلى سلة المهملات',
     fingerprint: 'بصمة المراجعة',
-    conflict: 'تغيّر الإعداد خارجيًا. أعد التحميل قبل الحفظ.',
     opSuccess: 'تم.',
     opFailed: 'فشل الإجراء.',
     ownershipWaycraft: 'تُديره Waycraft',
@@ -238,6 +372,69 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     tabs: 'تفاصيل الخادم',
     serverList: 'قائمة خوادم MCP',
     trashList: 'خوادم MCP في سلة المهملات',
+    refreshAria: 'تحديث الخوادم',
+    editServer: 'تعديل',
+    addTitle: 'إضافة خادم MCP',
+    editTitle: 'تعديل خادم MCP',
+    formNote: 'الحفظ يخزّن الإعداد فقط ولا يمنح الثقة ولا يتصل بالخادم ولا يشغّله. راجع الإعداد المحفوظ واعتمده، ثم اختبر الاتصال بشكل منفصل.',
+    transportLabel: 'النقل',
+    transportStdio: 'أمر محلي (stdio)',
+    transportHttp: 'رابط بعيد (HTTP متدفق)',
+    nameHelp: 'أحرف وأرقام ونقطة وشرطة سفلية أو شرطة. يبدأ بحرف أو رقم. لا يمكن تغييره بعد الإنشاء.',
+    nameLocked: 'اسم الخادم ثابت بعد الإنشاء.',
+    argsHelp: 'معامل واحد في كل سطر. تُحفظ المعاملات التي تحتوي مسافات كما كُتبت.',
+    errCleared: 'إزالة قيمة محفوظة غير مدعومة حاليًا. أدخل قيمة جديدة أو أبقِ القيمة المحفوظة.',
+    noChanges: 'لا توجد تغييرات للحفظ.',
+    saveDone: 'تم حفظ الإعداد. راجعه واعتمده، ثم اختبر الاتصال بشكل منفصل.',
+    envHelp: 'مفتاح=قيمة واحد في كل سطر. خزّن الأسرار كمراجع ${credential:REF} وليس كقيم نصية.',
+    headersHelp: 'اسم: قيمة واحدة في كل سطر. خزّن الأسرار كمراجع ${credential:REF} وليس كقيم نصية.',
+    advanced: 'خيارات متقدمة',
+    startupTimeoutMs: 'مهلة البدء (ms)',
+    toolCallTimeoutMs: 'مهلة استدعاء الأداة (ms)',
+    preview: 'معاينة الإعداد',
+    saveServer: 'حفظ الإعداد',
+    saving: 'جارٍ الحفظ…',
+    errRequired: 'مطلوب.',
+    errNameInvalid: 'استخدم أحرفًا وأرقامًا ونقطة وشرطة سفلية أو شرطة؛ ابدأ بحرف أو رقم (128 كحد أقصى).',
+    errUrlInvalid: 'أدخل رابطًا صالحًا يبدأ بـ http:// أو https://.',
+    errLineInvalid: 'استخدم مفتاح=قيمة في كل سطر.',
+    errHeaderInvalid: 'استخدم اسم: قيمة في كل سطر.',
+    errTimeoutInvalid: 'أدخل عددًا صحيحًا من المللي ثانية (0 أو أكثر).',
+    errSecretLiteral: 'يبدو هذا سرًا نصيًا. استبدله بمرجع ${credential:REF} قبل الحفظ.',
+    errSecretUrl: 'يحتوي الرابط على كلمة مرور أو رمز أو سر آخر. استخدم مرجع ${credential:REF} بدلًا من ذلك.',
+    errSecretArg: 'يبدو أحد المعاملات سرًا نصيًا. استبدله بمرجع ${credential:REF} قبل الحفظ.',
+    errRedactedLiteral: 'العنصر [REDACTED] ليس قيمة. أدخل مرجع ${credential:REF} بدلًا منه.',
+    keptNote: 'قيمة أو قيم سرية محفوظة كما هي.',
+    conflictReloaded: 'تغيّر الإعداد على القرص — أُعيد التحميل. راجعه ثم احفظ مرة أخرى.',
+    importPartialWarning: 'انتهى التسجيل مع مشكلات: تم تخطي بعض المرشحين أو رفضهم أو فشلهم. راجع النتيجة أدناه.',
+    errExists: 'يوجد خادم بهذا الاسم بالفعل. اختر اسمًا آخر.',
+    envLabel: 'متغيرات البيئة (مفتاح=قيمة)',
+    headersLabel: 'الترويسات (اسم: قيمة)',
+    errCommandRequired: 'الأمر مطلوب للخوادم المحلية (stdio).',
+    errUrlRequired: 'الرابط مطلوب للخوادم البعيدة (HTTP).',
+    formInvalid: 'صحّح الحقول المعلَّمة قبل الحفظ.',
+    dirtyCancel: 'تجاهل التغييرات غير المحفوظة؟',
+    discard: 'تجاهل',
+    keepEditing: 'متابعة التحرير',
+    statusSaved: 'محفوظ في الإعداد',
+    statusNotSaved: 'غير محفوظ',
+    statusRestart: 'قد يلزم إعادة التشغيل — لم يتم التحقق من تطبيقه على وقت التشغيل',
+    statusRestartNote: 'تحفظ Waycraft الإعداد؛ ولا تستطيع التأكد من أن وقت تشغيل DSH الجاري قد التقطه.',
+    testNever: 'لم يُختبر في هذه الجلسة',
+    testBadgeNever: 'غير مُختبر',
+    testPassed: 'نجح الاختبار',
+    testFailed: 'فشل الاختبار',
+    testOutcome: 'نتيجة الاختبار',
+    testPendingNote: 'شغّل اختبار الاتصال للتحقق من الخادم. الاختبار لا يعتمد الثقة.',
+    configOff: 'مُعطّل في الإعداد',
+    configOffHelp: 'هذا المفتاح يسجّل علامة الإعداد فقط. فرض التشغيل في DSH غير متحقق منه، لذا قد يظل الخادم يعمل.',
+    importResultRegistered: 'تم تسجيل {n} خادم.',
+    importResultReplaced: 'تم استبدال {n} خادم موجود.',
+    importResultSkipped: 'تم تخطي {n} لأن خادمًا بهذا الاسم موجود. اختر «استبدال» لكتابته فوقه.',
+    importResultRejected: 'تم رفض {n} مرشح فشل في التحقق.',
+    importResultFailed: 'فشل {n} مرشح بسبب خطأ.',
+    importResultNone: 'لم يتم تسجيل أي شيء.',
+    importResultNote: 'التسجيل لا يعتمد الثقة ولا يشغّل أي خادم. راجعها واختبرها بشكل منفصل.',
   };
 
   effect(() => ctx.locale.register(NS, { en, ar }), 'dsh-waycraft: mcp dictionaries');
@@ -262,6 +459,110 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     return data;
   }
 
+  // Guided form model (#174 A). Fields are strings as typed; buildConfig() maps them to the host shape.
+  // Error values are i18n keys (or null), so the same logic serves EN and AR.
+  const emptyForm = (overrides: any = {}) => ({
+    mode: 'create', originalName: '', transport: 'stdio', serverName: '', command: '', args: '', cwd: '',
+    env: '', url: '', headers: '', startupTimeoutMs: '', toolCallTimeoutMs: '', advanced: false, ...overrides,
+  });
+  // One argument per line. Each line is trimmed and blank lines are dropped; inner spaces are kept.
+  const parseArgs = (text: string): string[] => text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const parseKv = (text: string, sep: string): { map: Record<string, string>; bad: boolean } => {
+    const map: Record<string, string> = {}; let bad = false;
+    for (const raw of text.split(/\n+/)) {
+      const line = raw.trim(); if (!line) continue;
+      const i = line.indexOf(sep);
+      if (i <= 0) { bad = true; continue; }
+      map[line.slice(0, i).trim()] = line.slice(i + sep.length).trim();
+    }
+    return { map, bad };
+  };
+  function validateForm(f: any, original?: any): Record<string, string> {
+    const errors: Record<string, string> = {};
+    // Saved secrets the host masked as [REDACTED] are kept as stored: those fields are read-only and not validated.
+    const kept = original ? keptSecrets(original) : {} as Record<string, number>;
+    // Edit cannot clear a saved optional field: the host merges patches and has no clear-by-null contract.
+    if (original) {
+      const saved = formFromServer(original);
+      for (const key of ['cwd', 'env', 'headers', 'args', 'startupTimeoutMs', 'toolCallTimeoutMs'])
+        if (saved[key].trim() && !f[key].trim()) errors[key] = 'errCleared';
+    }
+    const name = f.serverName.trim();
+    if (!name) errors.serverName = 'errRequired';
+    else if (!NAME_RE.test(name)) errors.serverName = 'errNameInvalid';
+    if (f.transport === 'stdio') {
+      if (!f.command.trim()) errors.command = 'errCommandRequired';
+      else if (f.command.trim() === REDACTED && !kept.command) errors.command = 'errRedactedLiteral';
+    } else if (!kept.url) {
+      const url = f.url.trim();
+      if (!url) errors.url = 'errUrlRequired';
+      else if (url === REDACTED) errors.url = 'errRedactedLiteral';
+      else if (!isHttpUrl(url)) errors.url = 'errUrlInvalid';
+      else if (urlHasSecret(url)) errors.url = 'errSecretUrl';
+    }
+    // Only the active transport's fields are validated; hidden fields never block Save.
+    if (f.transport === 'stdio') {
+      if (!kept.args) {
+        const args = parseArgs(f.args);
+        if (args.includes(REDACTED)) errors.args = 'errRedactedLiteral';
+        else if (argsHaveSecret(args)) errors.args = 'errSecretArg';
+      }
+      if (!kept.env) {
+        const env = parseKv(f.env, '=');
+        if (env.bad) errors.env = 'errLineInvalid';
+        else if (Object.values(env.map).includes(REDACTED)) errors.env = 'errRedactedLiteral';
+        else if (Object.entries(env.map).some(([k, v]) => v && isPlainSecret(k, v))) errors.env = 'errSecretLiteral';
+      }
+    } else if (!kept.headers) {
+      const headers = parseKv(f.headers, ':');
+      if (headers.bad) errors.headers = 'errHeaderInvalid';
+      else if (Object.values(headers.map).includes(REDACTED)) errors.headers = 'errRedactedLiteral';
+      else if (Object.entries(headers.map).some(([k, v]) => v && isPlainSecret(k, v))) errors.headers = 'errSecretLiteral';
+    }
+    // Digits only: a timeout is a whole number of milliseconds, so "1.5", "-1" and "1e3" are rejected.
+    for (const field of ['startupTimeoutMs', 'toolCallTimeoutMs'])
+      if (f[field].trim() && !/^\d+$/.test(f[field].trim())) errors[field] = 'errTimeoutInvalid';
+    return errors;
+  }
+  function buildConfig(f: any): any {
+    const config: any = { serverName: f.serverName.trim(), transport: f.transport };
+    if (f.transport === 'stdio') {
+      config.command = f.command.trim();
+      const args = parseArgs(f.args); if (args.length) config.args = args;
+      if (f.cwd.trim()) config.cwd = f.cwd.trim();
+      const env = parseKv(f.env, '=').map; if (Object.keys(env).length) config.env = env;
+    } else {
+      config.url = f.url.trim();
+      const headers = parseKv(f.headers, ':').map; if (Object.keys(headers).length) config.headers = headers;
+    }
+    if (f.startupTimeoutMs.trim()) config.startupTimeoutMs = Number(f.startupTimeoutMs);
+    if (f.toolCallTimeoutMs.trim()) config.toolCallTimeoutMs = Number(f.toolCallTimeoutMs);
+    return config;
+  }
+  function formFromServer(server: any): any {
+    const c = server?.config || {};
+    const kv = (o: any, sep: string) => Object.entries(o || {}).map(([k, v]) => `${k}${sep}${v}`).join('\n');
+    return emptyForm({
+      mode: 'edit', originalName: c.serverName || server.serverName, transport: c.transport === 'streamable-http' ? 'streamable-http' : 'stdio',
+      serverName: c.serverName || server.serverName, command: c.command || '', args: (c.args || []).join('\n'), cwd: c.cwd || '',
+      env: kv(c.env, '='), url: c.url || '', headers: kv(c.headers, ': '),
+      startupTimeoutMs: c.startupTimeoutMs == null ? '' : String(c.startupTimeoutMs),
+      toolCallTimeoutMs: c.toolCallTimeoutMs == null ? '' : String(c.toolCallTimeoutMs),
+    });
+  }
+  // Edit sends only changed fields that still have a value. serverName is never in the patch (immutable).
+  // The host merges patches shallowly and has no clear-by-null contract, so an emptied optional field
+  // is not sent; the stored value stays until a new value is saved (surfaced as a note in the form).
+  function buildPatch(f: any, original: any): any {
+    const next = buildConfig(f); const prev = buildConfig(formFromServer(original));
+    const patch: any = {};
+    for (const k of Object.keys(next)) {
+      if (k === 'serverName') continue;
+      if (JSON.stringify(next[k]) !== JSON.stringify(prev[k])) patch[k] = next[k];
+    }
+    return patch;
+  }
+
   function ltr(value: any) { return h('bdi', { dir: 'ltr', style: { unicodeBidi: 'isolate' } }, value == null ? '' : String(value)); }
   function statusLabel(server: any) {
     if (server?.trash?.trashed) return t('filterTrashed');
@@ -279,6 +580,25 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     if (o === 'preexisting-dsh') return t('ownershipPreexisting');
     if (o === 'other') return t('ownershipOther');
     return t('ownershipUnknown');
+  }
+  // #174 B: Saved, runtime and test are separate outcomes. Waycraft never reports "Applied":
+  // it cannot observe the running DSH runtime, so a saved change is always "restart may be required".
+  function savedLabel(server: any) { return server ? t('statusSaved') : t('statusNotSaved'); }
+  function testLabel(result: { ok: boolean; message: string } | undefined) {
+    if (!result) return t('testNever');
+    return result.ok ? `${t('testPassed')}: ${result.message}` : `${t('testFailed')}: ${result.message}`;
+  }
+  // #174 C: plain sentences per import outcome, instead of raw JSON counters.
+  function importSummary(stats: any): string[] {
+    const n = (k: string) => Number(stats?.[k] || 0);
+    const pick = (key: string, count: number) => t(key).replace('{n}', String(count));
+    const lines: string[] = [];
+    if (n('registered')) lines.push(pick('importResultRegistered', n('registered')));
+    if (n('replaced')) lines.push(pick('importResultReplaced', n('replaced')));
+    if (n('skipped')) lines.push(pick('importResultSkipped', n('skipped')));
+    if (n('rejected')) lines.push(pick('importResultRejected', n('rejected')));
+    if (n('failed')) lines.push(pick('importResultFailed', n('failed')));
+    return lines.length ? lines : [t('importResultNone')];
   }
 
   const STYLE = `
@@ -329,7 +649,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp-seg{display:flex;flex-wrap:wrap;gap:4px;background:var(--dsw-alias-bg-layer-1);border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md,12px);padding:4px}
 .waycraft-mcp-seg button{flex:0 1 auto;min-block-size:32px;padding-inline:12px;border:none;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit}
 .waycraft-mcp-seg button:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
-.waycraft-mcp-seg button[aria-pressed="true"]{background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-weight:600}
+.waycraft-mcp-seg button[aria-pressed="true"],.waycraft-mcp-seg button[aria-checked="true"],.waycraft-mcp-seg button[aria-selected="true"]{background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-weight:600}
 .waycraft-mcp-seg button:disabled{opacity:.5;cursor:not-allowed}
 
 /* ===== Panels & KV ===== */
@@ -349,8 +669,28 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 /* ===== Alerts / notices / confirm ===== */
 .waycraft-mcp-notice{margin:0;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
 .waycraft-mcp-alert{margin:0;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-state-error-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
+.waycraft-mcp-alert.waycraft-mcp-alert-warn{background:var(--dsw-alias-state-warning-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-warning-primary)}
 .waycraft-mcp-field-error{margin:0;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-state-error-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
 .waycraft-mcp-confirm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;border:0.5px solid var(--dsw-alias-state-error-primary, var(--dsw-alias-border-l2));border-radius:10px}
+/* ===== Guided Add/Edit dialog (#174 A) ===== */
+.waycraft-mcp-overlay{position:fixed;inset:0;z-index:1000;container-type:normal;max-inline-size:none;inline-size:auto;display:flex;align-items:center;justify-content:center;padding:16px;background:color-mix(in srgb,var(--dsw-alias-bg-base) 60%,transparent);overflow:auto}
+.waycraft-mcp-dialog{container-type:inline-size;inline-size:min(600px,100%);max-block-size:calc(100dvh - 32px);display:flex;flex-direction:column;overflow:hidden;border:0.5px solid var(--dsw-alias-border-l3,var(--dsw-alias-border-l2));border-radius:var(--dsw-radius-xl,20px);background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-soft,var(--dsw-shadow-lv3))}
+.waycraft-mcp-dialog-head{padding:16px 24px;border-block-end:0.5px solid var(--dsw-alias-border-l2)}
+.waycraft-mcp-dialog-head h3{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.waycraft-mcp-dialog-body{display:flex;flex-direction:column;gap:16px;padding:24px;overflow:auto;min-block-size:0}
+.waycraft-mcp-dialog-footer{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:16px 24px;border-block-start:0.5px solid var(--dsw-alias-border-l2)}
+.waycraft-mcp-fields{display:grid;gap:12px}
+.waycraft-mcp-field{display:flex;flex-direction:column;gap:4px}
+.waycraft-mcp-field-label{display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.waycraft-mcp-field-label input,.waycraft-mcp-field-label textarea{inline-size:100%;font-size:14px;color:var(--dsw-alias-label-primary)}
+.waycraft-mcp-field-label textarea{font:12px/18px monospace}
+.waycraft-mcp-field-help{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
+.waycraft-mcp-field input[aria-invalid=true],.waycraft-mcp-field textarea[aria-invalid=true]{border-color:var(--dsw-alias-state-error-primary)}
+.waycraft-mcp-advanced{border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md,12px);padding:8px 12px}
+.waycraft-mcp-advanced>summary{cursor:pointer;min-block-size:28px;color:var(--dsw-alias-label-secondary)}
+.waycraft-mcp-advanced>.waycraft-mcp-fields{padding-block:8px}
+.waycraft-mcp-preview{display:flex;flex-direction:column;gap:4px}
+@container (min-width: 480px){.waycraft-mcp-fields{grid-template-columns:1fr 1fr}.waycraft-mcp-fields>.waycraft-mcp-field:first-child:last-child{grid-column:1/-1}}
 
 /* ===== Badges ===== */
 .waycraft-mcp-badge{white-space:nowrap;display:inline-flex;align-items:center;gap:4px;padding-inline:8px;border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-xs,4px);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;font-weight:400}
@@ -399,6 +739,159 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp-source-body{display:flex;flex-direction:column;gap:12px;padding:12px 16px}
 `;
 
+  // Maps a failed save to one readable sentence. Codes come from mcp.ts reject(); raw codes are never shown.
+  // Returns a string or a node: validation paths are technical tokens and render LTR.
+  function issueMessage(e: any): any {
+    if (e?.code === 'conflict') return t('conflictReloaded');
+    if (e?.code === 'exists') return t('errExists');
+    if (e?.code === 'trust_required') return t('trustUntrusted');
+    if (e?.code === 'validation') {
+      const issues: any[] = Array.isArray(e.data?.issues) ? e.data.issues : [];
+      if (!issues.length) return t('formInvalid');
+      const parts: any[] = [t('formInvalid')];
+      for (const i of issues) {
+        parts.push(' ');
+        if (i.path) parts.push(ltr(i.path), ': ');
+        parts.push(String(i.message || ''));
+      }
+      return h(React.Fragment, null, ...parts);
+    }
+    return e?.message || t('opFailed');
+  }
+
+  /** Body portal target; null without a DOM (unit tests), where the overlay renders inline. Same pattern as skills-browser.ts. */
+  const portalTarget = () => {
+    try {
+      const body = (document as any).body;
+      return body ? { body, dom: require('react-dom') } : null;
+    } catch {
+      return null;
+    }
+  };
+  // Technical tokens inside prose render LTR: splits on the capturing TECH_TOKEN pattern and wraps the matches in ltr().
+  const withTech = (text: any): any => {
+    const parts = String(text).split(TECH_TOKEN);
+    return parts.length === 1 ? text : h(React.Fragment, null, ...parts.map((p, i) => (i % 2 ? ltr(p) : p)));
+  };
+
+  // Guided Add/Edit dialog (#174 A). Owns its field state; the parent reloads after a successful save.
+  // Save calls rpc('create') or rpc('update') with the current fingerprint. Saving never trusts or connects.
+  function ServerFormDialog(props: { initial: any; fingerprint: string; original: any; onClose: () => void; onSaved: (d: any) => void; onConflict: (fingerprint?: string) => void }) {
+    const [f, setF] = React.useState(props.initial as any);
+    const [touched, setTouched] = React.useState({} as Record<string, boolean>);
+    const [attempted, setAttempted] = React.useState(false);
+    const [saving, setSaving] = React.useState(false);
+    const [serverError, setServerError] = React.useState('' as any);
+    const [confirmDiscard, setConfirmDiscard] = React.useState(false);
+    const ref = React.useRef(null as any);
+    // The control that opened the dialog gets focus back when the dialog unmounts.
+    const [opener] = React.useState(() => (typeof document !== 'undefined' ? document.activeElement : null) as any);
+    React.useEffect(() => { ref.current?.focus?.(); return () => { try { opener?.focus?.(); } catch { /* opener may be gone */ } }; }, []);
+    const isEdit = f.mode === 'edit';
+    const kept = isEdit ? keptSecrets(props.original) : {} as Record<string, number>;
+    const dirty = JSON.stringify(f) !== JSON.stringify(props.initial);
+    const errors = validateForm(f, isEdit ? props.original : undefined);
+    const hasErrors = Object.keys(errors).length > 0;
+    const setField = (key: string, value: any) => setF((prev: any) => ({ ...prev, [key]: value }));
+    const touch = (key: string) => setTouched((prev: Record<string, boolean>) => (prev[key] ? prev : { ...prev, [key]: true }));
+    const requestClose = () => { if (dirty) setConfirmDiscard(true); else props.onClose(); };
+    // Tab cycles inside the dialog so keyboard focus cannot reach the page behind the modal.
+    const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+    const trapTab = (event: any) => {
+      const items: any[] = Array.from(ref.current?.querySelectorAll?.(FOCUSABLE) || []);
+      if (!items.length) return;
+      const index = items.indexOf(event.target);
+      const wrapBack = event.shiftKey && index <= 0;
+      const wrapForward = !event.shiftKey && (index === -1 || index === items.length - 1);
+      if (wrapBack || wrapForward) { event.preventDefault?.(); (wrapBack ? items[items.length - 1] : items[0]).focus?.(); }
+    };
+    const onKeyDown = (event: any) => {
+      if (event.key === 'Escape') { event.stopPropagation?.(); requestClose(); }
+      else if (event.key === 'Tab') trapTab(event);
+    };
+    // The label wraps only the caption and control, so help and error text are not part of the field's name.
+    // Plaintext-secret errors show at once; other errors show after the field is touched or Save is attempted.
+    // Saved secrets kept as stored (host-masked): the field is read-only and shows a note instead of [REDACTED].
+    const keptFields: Record<string, number> = { env: kept.env || 0, headers: kept.headers || 0, args: kept.args || 0, url: kept.url || 0, command: kept.command || 0 };
+    const isKept = (key: string) => (keptFields[key] || 0) > 0;
+    const field = (key: string, caption: string, control: any, help?: any) => {
+      const shown = errors[key] && (IMMEDIATE_ERRORS.includes(errors[key]) || touched[key] || attempted) ? withTech(t(errors[key])) : '';
+      const helpId = `waycraft-mcp-${key}-help`;
+      const errId = `waycraft-mcp-${key}-error`;
+      const describedBy = [help ? helpId : '', shown ? errId : ''].filter(Boolean).join(' ') || undefined;
+      const note = isKept(key) ? h('span', { className: 'waycraft-mcp-field-help', role: 'status' }, `${keptFields[key]} ${t('keptNote')}`) : null;
+      return h('div', { className: 'waycraft-mcp-field' },
+        h('label', { className: 'waycraft-mcp-field-label' },
+          h('span', null, caption),
+          React.cloneElement(control, { 'aria-invalid': shown ? true : undefined, 'aria-describedby': describedBy })),
+        help ? h('span', { id: helpId, className: 'waycraft-mcp-field-help' }, withTech(help)) : null,
+        note,
+        shown ? h('span', { id: errId, role: 'alert', className: 'waycraft-mcp-field-error' }, shown) : null);
+    };
+    const input = (key: string, extra: any = {}) => h('input', { value: f[key], dir: 'ltr', disabled: isKept(key) || undefined, onInput: (e: any) => setField(key, e.target.value), onBlur: () => touch(key), ...extra });
+    const area = (key: string) => h('textarea', { value: f[key], rows: 3, dir: 'ltr', spellCheck: false, disabled: isKept(key) || undefined, onInput: (e: any) => setField(key, e.target.value), onBlur: () => touch(key) });
+    const save = async () => {
+      if (saving) return;
+      setAttempted(true);
+      if (hasErrors) { setServerError(t('formInvalid')); return; }
+      const patch = isEdit ? buildPatch(f, props.original) : null;
+      if (patch && !Object.keys(patch).length) { setServerError(t('noChanges')); return; }
+      // Defense in depth: a literal [REDACTED] must never reach the host as a stored value.
+      const payload = isEdit ? patch : buildConfig(f);
+      if (JSON.stringify(payload).includes(REDACTED)) { setServerError(t('errRedactedLiteral')); return; }
+      setSaving(true); setServerError('');
+      try {
+        const d = isEdit
+          ? await rpc('update', { serverName: props.original.serverName, expectedFingerprint: props.fingerprint, patch })
+          : await rpc('create', { config: buildConfig(f), expectedFingerprint: props.fingerprint });
+        props.onSaved(d);
+      } catch (e: any) {
+        setServerError(issueMessage(e));
+        // A conflict means the file changed on disk: reload, keep the typed values, and let the user review and save again.
+        if (e?.code === 'conflict') props.onConflict(e.data?.fingerprint);
+        setSaving(false);
+      }
+    };
+    const transportTab = (id: string, label: string) => h('button', { type: 'button', role: 'radio', 'aria-checked': f.transport === id, tabIndex: f.transport === id ? 0 : -1, disabled: isEdit, onClick: () => setField('transport', id) }, label);
+    const stdio = f.transport === 'stdio';
+    const body = h('div', { className: 'waycraft-mcp-dialog-body' },
+      h('p', { className: 'waycraft-mcp-notice' }, t('formNote')),
+      h('div', { className: 'waycraft-mcp-seg', role: 'radiogroup', 'aria-label': t('transportLabel') },
+        transportTab('stdio', t('transportStdio')), transportTab('streamable-http', t('transportHttp'))),
+      h('div', { className: 'waycraft-mcp-fields' },
+        field('serverName', t('serverName'), input('serverName', { disabled: isEdit, 'aria-readonly': isEdit ? true : undefined, required: true }), isEdit ? t('nameLocked') : t('nameHelp')),
+        ...(stdio
+          ? [field('command', t('command'), input('command', { required: true })),
+             field('args', t('args'), area('args'), t('argsHelp')),
+             field('cwd', t('cwd'), input('cwd')),
+             field('env', t('envLabel'), area('env'), t('envHelp'))]
+          : [field('url', t('url'), input('url', { required: true, type: 'url', inputMode: 'url' })),
+             field('headers', t('headersLabel'), area('headers'), t('headersHelp'))])),
+      h('details', { className: 'waycraft-mcp-advanced', open: !!(errors.startupTimeoutMs || errors.toolCallTimeoutMs) || undefined },
+        h('summary', null, t('advanced')),
+        h('div', { className: 'waycraft-mcp-fields' },
+          field('startupTimeoutMs', t('startupTimeoutMs'), input('startupTimeoutMs', { inputMode: 'numeric' })),
+          field('toolCallTimeoutMs', t('toolCallTimeoutMs'), input('toolCallTimeoutMs', { inputMode: 'numeric' })))),
+      h('div', { className: 'waycraft-mcp-preview' },
+        h('span', { className: 'waycraft-mcp-meta' }, t('preview')),
+        h('pre', { className: 'waycraft-mcp-pre' }, JSON.stringify(redactForPreview(buildConfig(f)), null, 2))),
+      serverError ? h('p', { role: 'alert', className: 'waycraft-mcp-alert' }, serverError) : null,
+      confirmDiscard ? h('div', { className: 'waycraft-mcp-confirm', role: 'alertdialog', 'aria-label': t('dirtyCancel') },
+        h('span', null, t('dirtyCancel')),
+        h('button', { type: 'button', className: 'waycraft-mcp-danger', onClick: props.onClose }, t('discard')),
+        h('button', { type: 'button', onClick: () => setConfirmDiscard(false) }, t('keepEditing'))) : null);
+    const footer = h('div', { className: 'waycraft-mcp-dialog-footer' },
+      h('button', { type: 'button', onClick: requestClose }, t('cancel')),
+      h('button', { type: 'button', className: 'waycraft-mcp-primary', disabled: saving, 'aria-disabled': hasErrors ? true : undefined, onClick: () => void save() }, saving ? t('saving') : t('saveServer')));
+    const overlay = h('div', { className: 'waycraft-mcp waycraft-mcp-overlay', dir: isArabic() ? 'rtl' : 'ltr' },
+      h('div', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'waycraft-mcp-dialog-title', className: 'waycraft-mcp-dialog', ref, tabIndex: -1, onKeyDown },
+        h('div', { className: 'waycraft-mcp-dialog-head' }, h('h3', { id: 'waycraft-mcp-dialog-title' }, isEdit ? t('editTitle') : t('addTitle'))),
+        body, footer));
+    // Portal to body: the panel's container-type ancestor would otherwise clip the position:fixed overlay.
+    const host = portalTarget();
+    return host ? host.dom.createPortal(overlay, host.body) : overlay;
+  }
+
   function McpPanel() {
     const [state, setState] = React.useState({ kind: 'loading' } as any);
     const [servers, setServers] = React.useState([] as any[]);
@@ -420,10 +913,15 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     const [importPreview, setImportPreview] = React.useState(null as any);
     const [importApprovals, setImportApprovals] = React.useState({} as Record<string,{approved:boolean,onConflict:'skip'|'replace'}>);
     const [importResult, setImportResult] = React.useState(null as any);
+    // Guided Add/Edit form (#174 A). Null when closed; values are edited locally until Save.
+    const [form, setForm] = React.useState(null as any);
+    // Last explicit connection test per server, this session only (#174 B). Cleared when the config is saved.
+    const [testResults, setTestResults] = React.useState({} as Record<string, { ok: boolean; message: string }>);
     const alive = React.useRef(true);
 
+    // Functional updater: a reload keeps a ready panel mounted, so an open form dialog is not unmounted.
     const load = React.useCallback(async () => {
-      if (state.kind === 'loading' || servers.length === 0) setState({ kind: 'loading' });
+      setState((prev: any) => (prev.kind === 'ready' ? prev : { kind: 'loading' }));
       setNotice(null);
       try {
         const data = await rpc('list');
@@ -441,9 +939,15 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 
     React.useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [load]);
 
-    const run = async (label: string, fn: () => Promise<any>, after?: (d:any)=>void) => {
+    // load() clears the notice, so the outcome notice is set after the reload. `after` may return a custom notice.
+    const run = async (label: string, fn: () => Promise<any>, after?: (d:any)=>any) => {
       setBusy(label); setNotice(null);
-      try { const d = await fn(); if (!alive.current) return; after?.(d); setNotice({ kind: 'ok', text: t('opSuccess') }); await load(); }
+      try {
+        const d = await fn(); if (!alive.current) return;
+        const custom = after?.(d);
+        await load();
+        if (alive.current) setNotice(custom || { kind: 'ok', text: t('opSuccess') });
+      }
       catch (e: any) {
         if (!alive.current) return;
         const preview = e?.data?.preview;
@@ -536,10 +1040,18 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
           h('button', { type: 'button', className: 'waycraft-mcp-primary', disabled: !!busy || !importPreview?.ok, onClick: () => void run('import-register', async () => {
             const approvals = Object.entries(importApprovals).filter(([,v]:any)=>v?.approved).map(([serverName,v]:any)=>({ serverName, approved: true, onConflict: v.onConflict || 'skip' }));
             if (!approvals.length) throw new Error(t('importNoPreview'));
-            const d = await rpc('import_register', { preview: importPreview, approvals });
+            // 207 means a partial import: rpc() throws on ok:false, but the body still carries the per-candidate stats.
+            let d: any;
+            try { d = await rpc('import_register', { preview: importPreview, approvals }); }
+            catch (e: any) { if (!e?.data?.import) throw e; d = e.data; }
             setImportResult(d.import || d);
             setImportPreview(null); setImportApprovals({});
             return d;
+          }, (d: any) => {
+            // Partial registration (207 or any rejected/failed/skipped candidate): warn instead of the generic success.
+            const stats = (d.import || d).stats || {};
+            const partial = ['rejected', 'failed', 'skipped'].some((k) => Number(stats[k]) > 0);
+            return partial ? { kind: 'warn', text: t('importPartialWarning') } : undefined;
           }) }, t('importApproveRegister'))),
       ),
       !importPreview ? h('p', { className: 'waycraft-mcp-notice' }, t('importNoPreview')) : h('div', { className: 'waycraft-mcp-card' },
@@ -549,20 +1061,42 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
           (importPreview.issues||[]).length ? h('div', { role: 'alert', className: 'waycraft-mcp-alert' }, (importPreview.issues||[]).map((iss:any,i:number)=>h('div',{key:i}, ltr(iss.path||''), iss.path?': ':'', iss.message||String(iss)))) : null,
           h('ul', { className: 'waycraft-mcp-list' }, (importPreview.candidates||[]).map((c:any,i:number)=>renderCandidate(c, `import:${i}`)))),
         ),
-      importResult ? h('div', { role: 'status', className: 'waycraft-mcp-alert' }, t('importRegistered'), ': ', ltr(JSON.stringify(importResult.stats||importResult))) : null
+      importResult ? h('div', { role: 'status', className: 'waycraft-mcp-alert' }, h('strong', null, t('importRegistered')), importSummary(importResult.stats).map((line: string, i: number) => h('p', { key: i, className: 'waycraft-mcp-notice' }, line)), h('p', { className: 'waycraft-mcp-notice' }, t('importResultNote'))) : null
     );
 
-    const switchControl = (props: { checked: boolean; disabled?: boolean; label: string; onToggle: () => void; bare?: boolean; text?: string }) =>
+    const switchControl = (props: { checked: boolean; disabled?: boolean; label: string; title?: string; onToggle: () => void; bare?: boolean; text?: string }) =>
       h('button', {
         type: 'button',
         role: 'switch',
         'aria-checked': props.checked,
         'aria-disabled': props.disabled,
         'aria-label': props.label,
+        title: props.title,
         className: 'waycraft-mcp-switch' + (props.bare ? '' : ''),
         disabled: props.disabled,
         onClick: props.onToggle,
       }, h('span', { className: 'waycraft-mcp-switch-thumb', 'aria-hidden': 'true' }));
+
+    // Explicit connection test (#174 B). A failed test returns 502 with the result body; read it from e.data.test.
+    // The host returns the refreshed tool cache on both paths; the Tools tab reads it from here.
+    const runTest = (serverName: string) => run('test', async () => {
+      try {
+        const d = await rpc('test_connection', { serverName, expectedFingerprint: fingerprint });
+        setTestResults((m:any)=>({...m,[serverName]:{ ok: !!d.test?.ok, message: String(d.test?.message||'') }}));
+        if (d.toolCache) setToolCache((m:any)=>({...m,[serverName]:d.toolCache}));
+        return d;
+      } catch (e: any) {
+        const msg = String(e?.data?.test?.message || '');
+        if (e?.data?.test) {
+          setTestResults((m:any)=>({...m,[serverName]:{ ok: false, message: msg }}));
+          if (e.data.toolCache) setToolCache((m:any)=>({...m,[serverName]:e.data.toolCache}));
+          throw new Error(`${t('testFailed')}: ${msg}`);
+        }
+        throw e;
+      }
+    });
+    const testBadge = (serverName: string) => { const r = testResults[serverName]; return r ? (r.ok ? t('testPassed') : t('testFailed')) : t('testBadgeNever'); };
+    const openEdit = (server: any) => setForm({ key: server.serverName, initial: formFromServer(server), original: server });
 
     const serverRow = (s:any, inTrash:boolean) => h('article', { key: s.serverName, className: 'waycraft-mcp-card', 'data-waycraft-server': s.serverName },
       h('div', { className: 'waycraft-mcp-card-body' },
@@ -579,10 +1113,12 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
             !inTrash
               ? h(React.Fragment, null,
                   h('button', { type: 'button', disabled: !!busy, onClick: () => { setSelected(s.serverName); setTab('overview'); setArea('servers'); }, 'aria-pressed': selected===s.serverName }, t('overview')),
-                  h('button', { type: 'button', disabled: !!busy, onClick: () => void run('test', () => rpc('test_connection', { serverName: s.serverName, expectedFingerprint: fingerprint }), (d)=>setToolCache((m:any)=>({...m,[s.serverName]:d.test||m[s.serverName]}))) }, t('testConnection')),
+                  h('button', { type: 'button', disabled: !!busy, onClick: () => void runTest(s.serverName) }, t('testConnection')),
+                  h('span', { className: 'waycraft-mcp-badge' }, testBadge(s.serverName)),
+                  h('button', { type: 'button', disabled: !!busy, onClick: () => openEdit(s) }, t('editServer')),
                   ['untrusted','invalidated'].includes(s.trust?.status) ? h('button', { type: 'button', disabled: !!busy, onClick: () => void run('trust', () => rpc('approve_trust', { serverName: s.serverName, reviewedConfigFingerprint: s.reviewedConfigFingerprint, expectedFingerprint: fingerprint })) }, t('approveTrust')) : null,
                   h('button', { type: 'button', className: 'waycraft-mcp-danger', disabled: !!busy, onClick: () => setConfirmState({ label: t('confirmTrash'), danger: true, fn: () => rpc('trash', { serverName: s.serverName, expectedFingerprint: fingerprint }) }) }, t('moveToTrash')),
-                  switchControl({ checked: !s.disabled, disabled: !!busy, label: `${t('toggle')}: ${s.serverName}`, onToggle: () => rpc('update', { serverName: s.serverName, expectedFingerprint: fingerprint, disabled: !s.disabled }), bare: true }),
+                  switchControl({ checked: !!s.disabled, disabled: !!busy, label: `${t('configOff')}: ${s.serverName}`, title: t('configOffHelp'), onToggle: () => void run('config-off', () => rpc('update', { serverName: s.serverName, expectedFingerprint: fingerprint, patch: { disabled: !s.disabled } })), bare: true }),
                 )
               : h(React.Fragment, null,
                   h('button', { type: 'button', disabled: !!busy, onClick: () => setConfirmState({ label: `${t('restore')}: ${s.serverName}?`, fn: () => rpc('restore', { serverName: s.serverName, expectedFingerprint: fingerprint }) }) }, t('restore')),
@@ -606,8 +1142,13 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
           h('dt',null,t('status')), h('dd',null,statusLabel(current)),
           h('dt',null,t('trustState')), h('dd',null,trustLabel(current.trust)),
           h('dt',null,t('transport')), h('dd',null,ltr(current.config?.transport)),
-          h('dt',null,t('connectionState')), h('dd',null,t('disconnectedNote')),
+          h('dt',null,t('savedState')), h('dd',null,savedLabel(current)),
+          h('dt',null,t('runtimeState')), h('dd',null,t('statusRestart')),
+          h('dt',null,t('testOutcome')), h('dd',null,testLabel(testResults[current.serverName])),
         ),
+        h('p', { className: 'waycraft-mcp-note' }, t('statusRestartNote')),
+        h('p', { className: 'waycraft-mcp-note' }, t('testPendingNote')),
+        h('p', { className: 'waycraft-mcp-note' }, t('disconnectedNote')),
         h('p', { className: 'waycraft-mcp-note' }, t('runtimeNote')),
         h('p', { className: 'waycraft-mcp-note' }, t('noScopeSelectors')),
       ) : null,
@@ -619,6 +1160,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         (() => { const tc = toolCache[current.serverName]; const tools = tc?.tools || tc?.cache?.tools || []; if (!tc) return h('p',{className:'waycraft-mcp-note'},t('toolsNever')); if (!tools.length) return h('p',{className:'waycraft-mcp-note'},t('noTools')); return h('div',{className:'waycraft-mcp-tools'}, h('table',null, h('thead',null,h('tr',null,h('th',null,t('toolName')),h('th',null,t('toolDescription')))), h('tbody',null,...tools.map((tool:any)=>h('tr',{key:tool.name},h('td',null,ltr(tool.name)),h('td',null,tool.description||'')))))); })()
       ) : null,
       tab === 'configuration' ? h('div', { role: 'tabpanel', className: 'waycraft-mcp-panel' },
+        current.trash?.trashed ? null : h('button', { type: 'button', disabled: !!busy, onClick: () => openEdit(current) }, t('editServer')),
         h('pre', { className: 'waycraft-mcp-pre' }, JSON.stringify(current.config||{}, null, 2)),
         current.limitation || current.trash?.limitation ? h('p', { role: 'status', className: 'waycraft-mcp-note' }, t('limitation'), ': ', current.limitation || current.trash?.limitation) : null
       ) : null,
@@ -640,7 +1182,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         h('select', { 'aria-label': t('filterAll'), value: filter, onChange: (e:any)=>setFilter(e.target.value) },
           h('option',{value:'all'},t('filterAll')), h('option',{value:'needsTrust'},t('filterNeedsTrust'))),
         h('button', { type: 'button', className: 'waycraft-mcp-icon-btn', 'aria-label': t('refreshAria'), disabled: !!busy, onClick: load, title: t('refresh') }, h('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'currentColor' }, h('path', { d: 'M17.65 6.35A7.958 7.958 0 0 1 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 0 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z' }))),
-        h('button', { type: 'button', className: 'waycraft-mcp-icon-btn', 'aria-label': t('addServer'), disabled: !!busy, onClick: () => { setArea('discover-import'); setTab('import'); }, title: t('addServer') }, h('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'currentColor' }, h('path', { d: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z' })))),
+        h('button', { type: 'button', className: 'waycraft-mcp-icon-btn', 'aria-label': t('addServer'), disabled: !!busy, onClick: () => setForm({ key: Date.now(), initial: emptyForm(), original: null }), title: t('addServer') }, h('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'currentColor' }, h('path', { d: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z' })))),
+      h('p', { className: 'waycraft-mcp-notice' }, t('configOffHelp')),
       h('ul', { className: 'waycraft-mcp-list', 'aria-label': t('serverList') }, visibleServers.length ? visibleServers.map((s:any)=>serverRow(s,false)) : h('li', { className: 'waycraft-mcp-note' }, t('empty'))),
       detail
     );
@@ -655,11 +1198,16 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       h('div', { className: 'waycraft-mcp-header' }, h('h2', { className: 'waycraft-mcp-title' }, t('title'))),
       h('p', { className: 'waycraft-mcp-notice' }, t('description')),
       h('p', { className: 'waycraft-mcp-notice' }, t('runtimeNote')),
-      notice ? h('p', { role: notice.kind==='err'?'alert':'status', className: 'waycraft-mcp-alert' }, notice.text, notice.code ? ` (${notice.code})` : '') : null,
+      notice ? h('p', { role: notice.kind==='err'?'alert':'status', className: 'waycraft-mcp-alert' + (notice.kind==='warn' ? ' waycraft-mcp-alert-warn' : '') }, notice.text, notice.code ? ` (${notice.code})` : '') : null,
       confirmUi,
       h('div', { className: 'waycraft-mcp-seg', role: 'tablist', 'aria-label': t('title') },
         [['servers',t('areaServers')],['discover',t('areaDiscoverImport')],['trash',t('areaTrash')]].map(([id,label]:any)=>h('button',{key:id,type:'button',role:'tab','aria-selected':area===id,tabIndex:area===id?0:-1,onClick:()=>setArea(id)},label, id==='trash' && trashed.length ? h('span',{className:'waycraft-mcp-badge'},trashed.length) : ''))),
       area === 'servers' ? serversArea : null,
+      form ? h(ServerFormDialog, { key: String(form.key), initial: form.initial, original: form.original, fingerprint,
+        onClose: () => setForm(null),
+        // Stale fingerprint: adopt the host's current one and reload; the dialog keeps the typed values.
+        onConflict: (fp?: string) => { if (fp) setFingerprint(fp); void load(); },
+        onSaved: (d: any) => { setForm(null); const name = form.original ? form.original.serverName : d?.server?.serverName; if (name) setTestResults((m:any)=>{ const { [name]: _drop, ...rest } = m; return rest; }); void load().then(() => { if (alive.current) setNotice({ kind: 'ok', text: t('saveDone') }); }); } }) : null,
       area === 'discover' ? h('div', null, discoveryArea, importArea) : null,
       area === 'trash' ? trashArea : null
     );

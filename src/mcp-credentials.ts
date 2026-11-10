@@ -60,10 +60,12 @@ export function validateCredentialSafety(config: Record<string, unknown>): Crede
     for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
       if (typeof v !== 'string') continue;
       if (hasCredentialRef(v)) continue;
-      issues.push({
-        path: `headers.${k}`,
-        message: `Header values may contain secrets; use \${credential:REF} for headers.${k}.`,
-      });
+      if (isSensitiveEnvKey(k) || looksLikePlaintextSecret(v)) {
+        issues.push({
+          path: `headers.${k}`,
+          message: `Potential plaintext secret in headers.${k}; use \${credential:REF} instead of storing secrets in config.`,
+        });
+      }
     }
   }
   return issues;

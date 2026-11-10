@@ -23,7 +23,8 @@ if (!ts) throw new Error('typescript module not found for mcp-browser-ui.test');
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-function loadMcpBrowser() {
+// host.document / host.reactDom are optional: the portal and focus paths need them, the inline paths do not.
+function loadMcpBrowser(host = {}) {
   const path = resolve('src/mcp-browser.ts');
   const src = readFileSync(path, 'utf8');
   const js = ts.transpileModule(src, {
@@ -33,7 +34,12 @@ function loadMcpBrowser() {
   const exports = {};
   vm.runInNewContext(js, {
     exports, module: { exports }, console,
-    require: (id) => id === 'react' ? React : (() => { throw new Error(`unexpected require ${id}`); })(),
+    require: (id) => {
+      if (id === 'react') return React;
+      if (id === 'react-dom' && host.reactDom) return host.reactDom;
+      throw new Error(`unexpected require ${id}`);
+    },
+    document: host.document,
     fetch: (...a) => globalThis.fetch(...a),
     Response, Headers,
     Promise, setTimeout, clearTimeout, JSON, Array, Object, String, Error,
@@ -323,5 +329,460 @@ test('#175 browser integration AR: discovery/import/trash labels RTL with LTR te
   assert.ok(findAll(renderer.toJSON(), n => n.type === 'textarea' && n.props?.dir === 'ltr').length >= 1 || findAll(renderer.toJSON(), n => n.type === 'textarea' && /direction:ltr/.test(n.props?.style?.direction||'')).length >= 1 || findAll(renderer.toJSON(), n => n.type === 'textarea').length >= 1);
   // Host authorization enforced: every action went through RPC route (same path/header as host gate)
   assert.ok(calls.includes('list'));
+  renderer.unmount();
+});
+
+// #174 A/B/C/D: guided Add/Edit form, honest status wording, friendly import result.
+const formRpcCalls = [];
+function formFetch(overrides = {}) {
+  return async (url, init) => {
+    const body = JSON.parse(init.body);
+    formRpcCalls.push({ action: body.action, body });
+    if (body.action === 'list') return jsonResponse(sampleData());
+    if (overrides[body.action]) return overrides[body.action](body);
+    return jsonResponse({ ok: true, fingerprint: 'fp2', servers: sampleData().servers });
+  };
+}
+async function mountPanel(lang, fetchImpl, { host, createNodeMock } = {}) {
+  const { applyMcp } = loadMcpBrowser(host);
+  const { ctx, sections } = makeCtx({ lang, fetchImpl });
+  applyMcp({ inject: (names, fn) => ctx.inject(names, fn) });
+  let renderer;
+  await act(async () => { renderer = Renderer.create(React.createElement(sections[0].component), createNodeMock ? { createNodeMock } : undefined); await Promise.resolve(); await Promise.resolve(); });
+  return renderer;
+}
+const setInput = async (node, value) => act(async () => { node.props.onInput({ target: { value } }); await Promise.resolve(); });
+const clickNode = async (node) => act(async () => { node.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
+const dialogOf = (r) => findAll(r.toJSON(), n => n.props?.role === 'dialog')[0];
+
+test('#174 A EN: add form validates required fields inline and does not call create on invalid input', async () => {
+  formRpcCalls.length = 0;
+  const renderer = await mountPanel('en', formFetch());
+  const addBtn = findAll(renderer.toJSON(), n => n.type === 'button' && n.props?.['aria-label'] === 'Add server')[0];
+  assert.ok(addBtn, 'Add server button missing');
+  await clickNode(addBtn);
+  assert.ok(dialogOf(renderer), 'add form dialog did not open');
+  assert.match(allText(renderer.toJSON()), /Add MCP server/);
+  // Save with an empty form: required errors are shown inline (role=alert), no RPC call.
+  const saveBtn = findAll(renderer.toJSON(), n => n.type === 'button' && /Save configuration/.test(allText(n)))[0];
+  await clickNode(saveBtn);
+  const alerts = findAll(renderer.toJSON(), n => n.props?.role === 'alert').map(allText).join(' | ');
+  assert.match(alerts, /Required\./);
+  assert.match(alerts, /Command is required for local \(stdio\) servers\./);
+  assert.ok(!formRpcCalls.some(c => c.action === 'create'), 'create must not be called for invalid input');
+  renderer.unmount();
+});
+
+test('#174 A EN: create sends the host-shaped config with the current fingerprint', async () => {
+  formRpcCalls.length = 0;
+  const renderer = await mountPanel('en', formFetch());
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && n.props?.['aria-label'] === 'Add server')[0]);
+  // Fields are rendered in order: serverName, command, args, cwd, env.
+  const inputs = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.dir === 'ltr');
+  await setInput(inputs[0], 'filesystem');
+  await setInput(inputs[1], 'npx');
+  const areas = findAll(renderer.toJSON(), n => n.type === 'textarea');
+  await setInput(areas[0], '-y\n/var/tmp with space');
+  await setInput(areas[1], 'API_TOKEN=${credential:fs_token}');
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && /Save configuration/.test(allText(n)))[0]);
+  const create = formRpcCalls.find(c => c.action === 'create');
+  assert.ok(create, 'create RPC missing');
+  assert.equal(create.body.expectedFingerprint, 'fp1');
+  assert.deepEqual(create.body.config, {
+    serverName: 'filesystem', transport: 'stdio', command: 'npx',
+    args: ['-y', '/var/tmp with space'], env: { API_TOKEN: '${credential:fs_token}' },
+  });
+  assert.equal(create.body.config.url, undefined);
+  renderer.unmount();
+});
+
+test('#174 A EN: edit keeps serverName read-only and sends only changed fields via update', async () => {
+  formRpcCalls.length = 0;
+  const renderer = await mountPanel('en', formFetch());
+  const editBtn = findAll(renderer.toJSON(), n => n.type === 'button' && allText(n) === 'Edit')[0];
+  assert.ok(editBtn, 'Edit button missing on server row');
+  await clickNode(editBtn);
+  assert.match(allText(renderer.toJSON()), /Edit MCP server/);
+  const nameInput = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.value === 'demo')[0];
+  assert.ok(nameInput, 'server name input missing');
+  assert.equal(nameInput.props.disabled, true, 'serverName must be disabled in edit mode');
+  assert.equal(nameInput.props['aria-readonly'], true);
+  // Change the timeout only; patch must carry that field and never serverName.
+  const timeout = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.inputMode === 'numeric')[1];
+  await setInput(timeout, '45000');
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && /Save configuration/.test(allText(n)))[0]);
+  const update = formRpcCalls.find(c => c.action === 'update');
+  assert.ok(update, 'update RPC missing');
+  assert.equal(update.body.serverName, 'demo');
+  assert.equal(update.body.expectedFingerprint, 'fp1');
+  assert.deepEqual(update.body.patch, { toolCallTimeoutMs: 45000 });
+  assert.equal('serverName' in update.body.patch, false);
+  renderer.unmount();
+});
+
+test('#174 A EN: plaintext secret in env is flagged inline and blocks save', async () => {
+  formRpcCalls.length = 0;
+  const renderer = await mountPanel('en', formFetch());
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && n.props?.['aria-label'] === 'Add server')[0]);
+  const inputs = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.dir === 'ltr');
+  await setInput(inputs[0], 'github');
+  await setInput(inputs[1], 'npx');
+  const areas = findAll(renderer.toJSON(), n => n.type === 'textarea');
+  await setInput(areas[1], 'GITHUB_TOKEN=ghp_abcdefghijklmnop1234');
+  const warning = findAll(renderer.toJSON(), n => n.props?.role === 'alert' && /plaintext secret/i.test(allText(n)));
+  assert.ok(warning.length > 0, 'plaintext secret warning not shown inline');
+  assert.match(allText(warning[0]), /\$\{credential:REF\}/);
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && /Save configuration/.test(allText(n)))[0]);
+  assert.ok(!formRpcCalls.some(c => c.action === 'create'), 'plaintext secret must not reach create');
+  renderer.unmount();
+});
+
+test('#174 B EN: overview shows separate Saved, Applied and Test wording without claiming Applied', async () => {
+  const renderer = await mountPanel('en', formFetch());
+  const overviewTab = findAll(renderer.toJSON(), n => n.type === 'button' && n.props?.role === 'tab' && allText(n) === 'Overview')[0];
+  // demo server is selected by default and overview is the first tab.
+  const text = allText(renderer.toJSON());
+  assert.match(text, /Saved to configuration/);
+  assert.match(text, /Restart may be required — runtime application not verified/);
+  assert.match(text, /Not tested in this session/);
+  assert.ok(!/\bApplied\b/.test(text), 'overview must not claim Applied');
+  assert.ok(overviewTab);
+  renderer.unmount();
+});
+
+test('#174 B AR: overview shows honest restart wording and test result in Arabic', async () => {
+  const renderer = await mountPanel('ar', formFetch());
+  const text = allText(renderer.toJSON());
+  assert.match(text, /قد يلزم إعادة التشغيل — لم يتم التحقق من تطبيقه على وقت التشغيل/);
+  assert.match(text, /لم يُختبر في هذه الجلسة/);
+  assert.match(text, /محفوظ في الإعداد/);
+  renderer.unmount();
+});
+
+test('#174 C EN: import result is a plain sentence per outcome, not raw JSON', async () => {
+  const renderer = await mountPanel('en', formFetch({
+    import_preview: async () => jsonResponse(importPreviewSample),
+    import_register: async () => jsonResponse({ ok: false, fingerprint: 'fp2', import: { ok: false, stats: { registered: 0, replaced: 0, skipped: 1, rejected: 0, failed: 0 }, results: [] }, servers: sampleData().servers }, 207),
+  }));
+  await clickNode(findButton(renderer.toJSON(), /Discover & Import/));
+  const importTa = findAll(renderer.toJSON(), n => n.type === 'textarea')[1];
+  await setInput(importTa, '{"mcpServers":{"imported":{"command":"node"}}}');
+  await clickNode(findButton(renderer.toJSON(), /Preview import/));
+  const cb = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.type === 'checkbox' && !n.props?.checked && !n.props?.disabled)[0];
+  await act(async () => { cb.props.onChange({ target: { checked: true } }); await Promise.resolve(); });
+  await clickNode(findButton(renderer.toJSON(), /Register approved candidates/));
+  const text = allText(renderer.toJSON());
+  assert.match(text, /Skipped 1 because a server with that name already exists\. Choose Replace to overwrite it\./);
+  assert.ok(!/"registered"/.test(text), 'raw JSON counters must not be shown');
+  assert.match(text, /Registration does not trust or start any server/);
+  renderer.unmount();
+});
+
+test('#174 C AR: import result sentences are Arabic and free of raw JSON', async () => {
+  const renderer = await mountPanel('ar', formFetch({
+    import_preview: async () => jsonResponse(importPreviewSample),
+    import_register: async () => jsonResponse({ ok: true, fingerprint: 'fp2', import: { ok: true, stats: { registered: 2, replaced: 0, skipped: 0, rejected: 0, failed: 0 }, results: [] }, servers: sampleData().servers }),
+  }));
+  await clickNode(findButton(renderer.toJSON(), /الاكتشاف والاستيراد/));
+  const importTa = findAll(renderer.toJSON(), n => n.type === 'textarea')[1];
+  await setInput(importTa, '{"mcpServers":{"imported":{"command":"node"}}}');
+  await clickNode(findButton(renderer.toJSON(), /معاينة الاستيراد/));
+  const cb = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.type === 'checkbox' && !n.props?.checked && !n.props?.disabled)[0];
+  await act(async () => { cb.props.onChange({ target: { checked: true } }); await Promise.resolve(); });
+  await clickNode(findButton(renderer.toJSON(), /تسجيل المرشحين المعتمدين/));
+  const text = allText(renderer.toJSON());
+  assert.match(text, /تم تسجيل 2 خادم\./);
+  assert.ok(!/"registered"/.test(text), 'raw JSON counters must not be shown');
+  renderer.unmount();
+});
+
+test('#174 A AR: add form shows Arabic inline errors and blocks create on invalid input', async () => {
+  formRpcCalls.length = 0;
+  const renderer = await mountPanel('ar', formFetch());
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && n.props?.['aria-label'] === 'إضافة خادم')[0]);
+  assert.match(allText(renderer.toJSON()), /إضافة خادم MCP/);
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && /حفظ الإعداد/.test(allText(n)))[0]);
+  const alerts = findAll(renderer.toJSON(), n => n.props?.role === 'alert').map(allText).join(' | ');
+  assert.match(alerts, /مطلوب\./);
+  assert.match(alerts, /الأمر مطلوب للخوادم المحلية \(stdio\)\./);
+  assert.ok(!formRpcCalls.some(c => c.action === 'create'), 'create must not be called for invalid input');
+  renderer.unmount();
+});
+
+test('#174 A AR: edit keeps serverName read-only and sends update without serverName', async () => {
+  formRpcCalls.length = 0;
+  const renderer = await mountPanel('ar', formFetch());
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && allText(n) === 'تعديل')[0]);
+  assert.match(allText(renderer.toJSON()), /تعديل خادم MCP/);
+  const nameInput = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.value === 'demo')[0];
+  assert.equal(nameInput.props.disabled, true);
+  assert.match(allText(renderer.toJSON()), /اسم الخادم ثابت بعد الإنشاء\./);
+  const timeout = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.inputMode === 'numeric')[1];
+  await setInput(timeout, '45000');
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && /حفظ الإعداد/.test(allText(n)))[0]);
+  const update = formRpcCalls.find(c => c.action === 'update');
+  assert.ok(update, 'update RPC missing');
+  assert.deepEqual(update.body.patch, { toolCallTimeoutMs: 45000 });
+  renderer.unmount();
+});
+
+test('#174 A AR: plaintext secret warning is shown in Arabic and blocks save', async () => {
+  formRpcCalls.length = 0;
+  const renderer = await mountPanel('ar', formFetch());
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && n.props?.['aria-label'] === 'إضافة خادم')[0]);
+  const inputs = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.dir === 'ltr');
+  await setInput(inputs[0], 'github');
+  await setInput(inputs[1], 'npx');
+  const areas = findAll(renderer.toJSON(), n => n.type === 'textarea');
+  await setInput(areas[1], 'GITHUB_TOKEN=ghp_abcdefghijklmnop1234');
+  const warning = findAll(renderer.toJSON(), n => n.props?.role === 'alert' && /سرًا نصيًا/.test(allText(n)));
+  assert.ok(warning.length > 0, 'Arabic plaintext secret warning not shown inline');
+  assert.match(allText(warning[0]), /\$\{credential:REF\}/);
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && /حفظ الإعداد/.test(allText(n)))[0]);
+  assert.ok(!formRpcCalls.some(c => c.action === 'create'), 'plaintext secret must not reach create');
+  renderer.unmount();
+});
+
+// Review fixes P1-1..P3. An injected document/react-dom exercises the portal and focus paths.
+const flush = () => act(async () => { await new Promise(r => setTimeout(r, 5)); });
+const addButton = (r) => findAll(r.toJSON(), n => n.type === 'button' && n.props?.['aria-label'] === 'Add server')[0];
+const saveButton = (r) => findAll(r.toJSON(), n => n.type === 'button' && /Save configuration/.test(allText(n)))[0];
+const alertsText = (r) => findAll(r.toJSON(), n => n.props?.role === 'alert').map(allText).join(' | ');
+const rpcCount = (action) => formRpcCalls.filter(c => c.action === action).length;
+const ltrInputs = (r) => findAll(r.toJSON(), n => n.type === 'input' && n.props?.dir === 'ltr');
+const radioNamed = (r, re) => findAll(r.toJSON(), n => n.props?.role === 'radio' && re.test(allText(n)))[0];
+
+test('#174 P1-1 EN: form overlay is portaled to document.body and keeps the modal class', async () => {
+  formRpcCalls.length = 0;
+  const fakeBody = {};
+  const portals = [];
+  const host = {
+    document: { body: fakeBody, activeElement: null },
+    reactDom: { createPortal: (el, target) => { portals.push({ target, className: el.props.className }); return el; } },
+  };
+  const renderer = await mountPanel('en', formFetch(), { host });
+  await clickNode(addButton(renderer));
+  assert.ok(portals.some(p => p.target === fakeBody), 'overlay must be portaled to document.body');
+  assert.ok(portals.some(p => p.className === 'waycraft-mcp waycraft-mcp-overlay'), 'overlay keeps its classes');
+  assert.ok(dialogOf(renderer), 'dialog renders through the portal');
+  renderer.unmount();
+});
+
+test('#174 P1-2 EN: conflict reloads the panel, keeps typed values, and retries with the fresh fingerprint', async () => {
+  formRpcCalls.length = 0;
+  let fp = 'fp1';
+  let updates = 0;
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    formRpcCalls.push({ action: body.action, body });
+    if (body.action === 'list') { const d = sampleData(); d.fingerprint = fp; return jsonResponse(d); }
+    if (body.action === 'update') {
+      updates += 1;
+      if (updates === 1) { fp = 'fp2'; return jsonResponse({ ok: false, code: 'conflict', error: 'conflict', fingerprint: 'fp2' }, 409); }
+      return jsonResponse({ ok: true, fingerprint: 'fp3', servers: sampleData().servers });
+    }
+    return jsonResponse({ ok: true, fingerprint: fp, servers: sampleData().servers });
+  };
+  const renderer = await mountPanel('en', fetchImpl);
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && allText(n) === 'Edit')[0]);
+  await setInput(findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.inputMode === 'numeric')[1], '45000');
+  await clickNode(saveButton(renderer));
+  await flush();
+  assert.equal(formRpcCalls.filter(c => c.action === 'update')[0].body.expectedFingerprint, 'fp1');
+  assert.ok(dialogOf(renderer), 'dialog stays open after a conflict');
+  assert.match(alertsText(renderer), /Configuration changed on disk - reloaded; review and save again\./);
+  assert.ok(rpcCount('list') >= 2, 'panel reloads after the conflict');
+  assert.equal(findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.inputMode === 'numeric')[1].props.value, '45000', 'typed values are kept');
+  await clickNode(saveButton(renderer));
+  await flush();
+  assert.equal(formRpcCalls.filter(c => c.action === 'update')[1].body.expectedFingerprint, 'fp2', 'retry uses the fresh fingerprint');
+  renderer.unmount();
+});
+
+test('#174 P1-3 EN: saved [REDACTED] secrets are kept, never sent, and a typed [REDACTED] is blocked', async () => {
+  formRpcCalls.length = 0;
+  const redactedData = { ok: true, fingerprint: 'fp1', servers: [{ serverName: 'vault', ownership: 'waycraft', disabled: false,
+    config: { serverName: 'vault', transport: 'stdio', command: 'node', env: { API_TOKEN: '[REDACTED]' }, toolCallTimeoutMs: 1000 },
+    reviewedConfigFingerprint: 'rfp1', trust: { status: 'untrusted', reviewedFingerprint: '' } }], trashedServers: [] };
+  const renderer = await mountPanel('en', async (url, init) => {
+    const body = JSON.parse(init.body);
+    formRpcCalls.push({ action: body.action, body });
+    if (body.action === 'list') return jsonResponse(redactedData);
+    return jsonResponse({ ok: true, fingerprint: 'fp1', servers: redactedData.servers });
+  });
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && allText(n) === 'Edit')[0]);
+  // Stdio form order: args (textarea 0), env (textarea 1).
+  const env = findAll(renderer.toJSON(), n => n.type === 'textarea')[1];
+  assert.equal(env.props.disabled, true, 'env with a kept secret is read-only');
+  assert.match(allText(renderer.toJSON()), /1 saved secret value\(s\) kept as stored\./);
+  await setInput(findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.inputMode === 'numeric')[1], '45000');
+  await clickNode(saveButton(renderer));
+  await flush();
+  const update = formRpcCalls.find(c => c.action === 'update');
+  assert.deepEqual(update.body.patch, { toolCallTimeoutMs: 45000 });
+  assert.equal(JSON.stringify(update.body).includes('[REDACTED]'), false, 'the literal placeholder is never sent');
+  renderer.unmount();
+
+  formRpcCalls.length = 0;
+  const addForm = await mountPanel('en', formFetch());
+  await clickNode(addButton(addForm));
+  const inputs = ltrInputs(addForm);
+  await setInput(inputs[0], 'github');
+  await setInput(inputs[1], 'npx');
+  await setInput(findAll(addForm.toJSON(), n => n.type === 'textarea')[1], 'API_TOKEN=[REDACTED]');
+  await clickNode(saveButton(addForm));
+  assert.match(alertsText(addForm), /placeholder \[REDACTED\] is not a value/);
+  assert.equal(rpcCount('create'), 0, 'typed [REDACTED] must not reach create');
+  addForm.unmount();
+});
+
+test('#174 P2-1 EN: Test connection fills the Tools tab from the host tool cache on success and on a failed test', async () => {
+  for (const [status, ok] of [[200, true], [502, false]]) {
+    const renderer = await mountPanel('en', async (url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'list') return jsonResponse(sampleData());
+      if (body.action === 'test_connection') return jsonResponse({ ok, fingerprint: 'fp1', server: sampleData().servers[0],
+        test: { ok, message: ok ? 'Connected' : 'Refused' }, toolCache: { tools: [{ name: 'read_file', description: 'Reads a file' }] } }, status);
+      return jsonResponse({ ok: true, fingerprint: 'fp1', servers: sampleData().servers });
+    });
+    await clickNode(findButton(renderer.toJSON(), /^Test connection$/));
+    await flush();
+    await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && n.props?.role === 'tab' && allText(n) === 'Tools')[0]);
+    assert.match(allText(renderer.toJSON()), /read_file/, `Tools tab populated after status ${status}`);
+    renderer.unmount();
+  }
+});
+
+async function registerImport(stats, status) {
+  const renderer = await mountPanel('en', formFetch({
+    import_preview: async () => jsonResponse(importPreviewSample),
+    import_register: async () => jsonResponse({ ok: status === 200, fingerprint: 'fp2', import: { ok: status === 200, stats, results: [] }, servers: sampleData().servers }, status),
+  }));
+  await clickNode(findButton(renderer.toJSON(), /Discover & Import/));
+  await setInput(findAll(renderer.toJSON(), n => n.type === 'textarea')[1], '{"mcpServers":{"imported":{"command":"node"}}}');
+  await clickNode(findButton(renderer.toJSON(), /Preview import/));
+  const cb = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.type === 'checkbox' && !n.props?.checked && !n.props?.disabled)[0];
+  await act(async () => { cb.props.onChange({ target: { checked: true } }); await Promise.resolve(); });
+  await clickNode(findButton(renderer.toJSON(), /Register approved candidates/));
+  await flush();
+  return renderer;
+}
+
+test('#175 P2-2 EN: a partial registration shows a warning instead of the generic success', async () => {
+  formRpcCalls.length = 0;
+  const partial = await registerImport({ registered: 1, replaced: 0, skipped: 0, rejected: 1, failed: 0 }, 207);
+  assert.ok(findAll(partial.toJSON(), n => n.props?.role === 'status' && /waycraft-mcp-alert-warn/.test(n.props?.className || '')).length > 0, 'warning notice shown');
+  assert.match(allText(partial.toJSON()), /Registration finished with issues/);
+  assert.equal(findAll(partial.toJSON(), n => n.type === 'p' && allText(n) === 'Done.').length, 0, 'no generic success for a partial import');
+  partial.unmount();
+
+  const clean = await registerImport({ registered: 1, replaced: 0, skipped: 0, rejected: 0, failed: 0 }, 200);
+  assert.equal(findAll(clean.toJSON(), n => n.type === 'p' && allText(n) === 'Done.').length, 1, 'clean import keeps the success notice');
+  assert.equal(findAll(clean.toJSON(), n => /waycraft-mcp-alert-warn/.test(n.props?.className || '')).length, 0);
+  clean.unmount();
+});
+
+test('#174 P2-3 EN: secrets in URL userinfo, sensitive query values and args block Save and are masked in the preview', async () => {
+  formRpcCalls.length = 0;
+  const renderer = await mountPanel('en', formFetch());
+  await clickNode(addButton(renderer));
+  await clickNode(radioNamed(renderer, /Remote URL/));
+  let inputs = ltrInputs(renderer);
+  await setInput(inputs[0], 'remote');
+  await setInput(inputs[1], 'https://user:pass@example.com/mcp');
+  assert.match(alertsText(renderer), /password, token or other secret/);
+  const preview = findAll(renderer.toJSON(), n => n.type === 'pre')[0];
+  assert.match(allText(preview), /https:\/\/\[REDACTED\]@example\.com\/mcp/);
+  assert.equal(allText(preview).includes('pass@'), false, 'userinfo is masked in the preview');
+  await clickNode(saveButton(renderer));
+  assert.equal(rpcCount('create'), 0, 'userinfo URL must not reach create');
+  await setInput(inputs[1], 'https://example.com/mcp?api_key=abc123');
+  assert.match(alertsText(renderer), /password, token or other secret/);
+  await setInput(inputs[1], 'https://example.com/mcp?api_key=${credential:api}');
+  assert.doesNotMatch(alertsText(renderer), /password, token or other secret/, 'credential reference in a query is allowed');
+
+  await clickNode(radioNamed(renderer, /Local command/));
+  inputs = ltrInputs(renderer);
+  await setInput(inputs[0], 'fs');
+  await setInput(inputs[1], 'npx');
+  const args = findAll(renderer.toJSON(), n => n.type === 'textarea')[0];
+  await setInput(args, '--token\nabc123def');
+  await clickNode(saveButton(renderer));
+  assert.match(alertsText(renderer), /argument looks like a plaintext secret/);
+  assert.equal(allText(findAll(renderer.toJSON(), n => n.type === 'pre')[0]).includes('abc123def'), false, 'flagged literal is masked in the preview');
+  await setInput(args, 'ghp_abcdefghijklmnop1234');
+  await clickNode(saveButton(renderer));
+  assert.match(alertsText(renderer), /argument looks like a plaintext secret/, 'secret-shaped argument is blocked');
+  assert.equal(rpcCount('create'), 0, 'secret args must not reach create');
+  await setInput(args, '--token\n${credential:fs_token}');
+  await clickNode(saveButton(renderer));
+  await flush();
+  assert.equal(rpcCount('create'), 1, 'credential reference in args is accepted');
+  renderer.unmount();
+});
+
+test('#174 P2-4 EN: dialog title labels the dialog, Tab stays inside it, and focus returns to the opener on close', async () => {
+  formRpcCalls.length = 0;
+  const focusLog = [];
+  const opener = { focused: 0, focus() { this.focused += 1; } };
+  const firstNode = { focus() { focusLog.push('first'); } };
+  const lastNode = { focus() { focusLog.push('last'); } };
+  const createNodeMock = (element) => (element.type === 'div' && element.props?.role === 'dialog'
+    ? { focus() { focusLog.push('dialog'); }, querySelectorAll() { return [firstNode, lastNode]; } }
+    : null);
+  const host = { document: { body: {}, activeElement: opener }, reactDom: { createPortal: (el) => el } };
+  const renderer = await mountPanel('en', formFetch(), { host, createNodeMock });
+  await clickNode(addButton(renderer));
+  const dialog = dialogOf(renderer);
+  assert.ok(dialog);
+  const heading = findAll(renderer.toJSON(), n => n.type === 'h3')[0];
+  assert.equal(dialog.props['aria-labelledby'], heading.props.id);
+  assert.equal(dialog.props['aria-label'], undefined);
+  await act(async () => { dialog.props.onKeyDown({ key: 'Tab', shiftKey: false, target: lastNode, preventDefault() {} }); });
+  assert.equal(focusLog[focusLog.length - 1], 'first', 'Tab from the last control wraps to the first');
+  await act(async () => { dialog.props.onKeyDown({ key: 'Tab', shiftKey: true, target: firstNode, preventDefault() {} }); });
+  assert.equal(focusLog[focusLog.length - 1], 'last', 'Shift+Tab from the first control wraps to the last');
+  await clickNode(findAll(renderer.toJSON(), n => n.type === 'button' && allText(n) === 'Cancel')[0]);
+  assert.equal(opener.focused, 1, 'focus returns to the opener');
+  assert.equal(dialogOf(renderer), undefined);
+  renderer.unmount();
+});
+
+test('#174 P3 EN: transport radios expose aria-checked, timeouts must be whole numbers, and technical tokens render LTR', async () => {
+  formRpcCalls.length = 0;
+  const renderer = await mountPanel('en', formFetch());
+  await clickNode(addButton(renderer));
+  const radios = findAll(renderer.toJSON(), n => n.props?.role === 'radio');
+  assert.equal(radios.length, 2);
+  assert.equal(radios[0].props['aria-checked'], true);
+  assert.equal(radios[1].props['aria-checked'], false);
+  assert.ok(findAll(renderer.toJSON(), n => n.type === 'style' && /aria-checked="true"/.test(allText(n))).length > 0, 'radio selected state is styled');
+  assert.ok(findAll(renderer.toJSON(), n => n.type === 'bdi' && n.props?.dir === 'ltr' && allText(n) === '${credential:REF}').length > 0);
+  assert.ok(findAll(renderer.toJSON(), n => n.type === 'bdi' && n.props?.dir === 'ltr' && allText(n) === 'KEY=VALUE').length > 0);
+  const inputs = ltrInputs(renderer);
+  await setInput(inputs[0], 'fs');
+  await setInput(inputs[1], 'npx');
+  const timeout = findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.inputMode === 'numeric')[0];
+  await setInput(timeout, '1.5');
+  await clickNode(saveButton(renderer));
+  assert.match(alertsText(renderer), /whole number of milliseconds/);
+  await setInput(findAll(renderer.toJSON(), n => n.type === 'input' && n.props?.inputMode === 'numeric')[0], '1500');
+  assert.doesNotMatch(alertsText(renderer), /whole number of milliseconds/);
+  renderer.unmount();
+});
+
+test('#174 P3 EN: validation issue paths render as LTR technical tokens in the save error', async () => {
+  formRpcCalls.length = 0;
+  const renderer = await mountPanel('en', formFetch({
+    create: async () => jsonResponse({ ok: false, code: 'validation', error: 'Invalid server config', issues: [{ path: 'config.command', message: 'Required' }] }, 400),
+  }));
+  await clickNode(addButton(renderer));
+  const inputs = ltrInputs(renderer);
+  await setInput(inputs[0], 'fs');
+  await setInput(inputs[1], 'npx');
+  await clickNode(saveButton(renderer));
+  await flush();
+  assert.match(alertsText(renderer), /config\.command: Required/);
+  assert.ok(findAll(renderer.toJSON(), n => n.type === 'bdi' && allText(n) === 'config.command').length > 0);
   renderer.unmount();
 });

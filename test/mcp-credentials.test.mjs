@@ -74,6 +74,11 @@ test('#166 validation: credential refs allowed, plaintext secrets rejected in se
   }, { mode: 'create' });
   assert.equal(badHeader.ok, false);
   assertNoLeak(JSON.stringify(badHeader.issues), 'header validation issues');
+  const plainHeader = validateMcpServerConfig({
+    serverName: 'hdr-ok', transport: 'streamable-http', url: 'https://example.test/mcp',
+    headers: { 'Content-Type': 'application/json' },
+  }, { mode: 'create' });
+  assert.equal(plainHeader.ok, true, JSON.stringify(plainHeader.issues));
 });
 
 test('#166 redaction: observable config never exposes plaintext secrets, preserves credential refs', () => {
