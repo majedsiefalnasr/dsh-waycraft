@@ -246,6 +246,11 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     dirtyCancel: 'Discard unsaved changes?',
     discard: 'Discard',
     keepEditing: 'Keep editing',
+    dirtyCancelBody: 'Your changes to this server have not been saved.',
+    dismiss: 'Dismiss',
+    toastTrashed: 'Moved to Trash',
+    toastRestored: 'Restored (disabled until you re-approve)',
+    toastDeleted: 'Permanently deleted',
     statusSaved: 'Saved to configuration',
     statusNotSaved: 'Not saved',
     statusRestart: 'Restart may be required — runtime application not verified',
@@ -424,6 +429,11 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     dirtyCancel: 'تجاهل التغييرات غير المحفوظة؟',
     discard: 'تجاهل',
     keepEditing: 'متابعة التحرير',
+    dirtyCancelBody: 'لم يتم حفظ تغييراتك على هذا الخادم.',
+    dismiss: 'إغلاق',
+    toastTrashed: 'نُقل إلى سلة المهملات',
+    toastRestored: 'تمت الاستعادة (معطّل حتى تعتمده من جديد)',
+    toastDeleted: 'تم الحذف نهائيًا',
     statusSaved: 'محفوظ في الإعداد',
     statusNotSaved: 'غير محفوظ',
     statusRestart: 'قد يلزم إعادة التشغيل — لم يتم التحقق من تطبيقه على وقت التشغيل',
@@ -692,6 +702,20 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp-alert{margin:0;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-state-error-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
 .waycraft-mcp-alert.waycraft-mcp-alert-warn{background:var(--dsw-alias-state-warning-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-warning-primary)}
 .waycraft-mcp-field-error{margin:0;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-state-error-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
+.waycraft-mcp-dialog-sm{inline-size:min(440px,100%)}
+.waycraft-mcp-confirm-msg{margin:0;line-height:20px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.waycraft-mcp button.waycraft-mcp-danger-solid{background:var(--dsw-alias-state-error-primary);border-color:transparent;color:var(--dsw-alias-label-primary-foreground,var(--dsw-alias-bg-base))}
+.waycraft-mcp button.waycraft-mcp-danger-solid:hover:not(:disabled){filter:brightness(1.08)}
+.waycraft-mcp button.waycraft-mcp-danger-solid:disabled{opacity:.5}
+.waycraft-mcp-toasts{position:fixed;flex-direction:row;align-items:flex-end;inset-block-end:16px;inset-inline:16px;z-index:1100;display:flex;justify-content:center;pointer-events:none;container-type:normal;max-inline-size:none;inline-size:auto}
+.waycraft-mcp-toast{pointer-events:auto;display:flex;align-items:center;gap:10px;max-inline-size:min(520px,100%);padding:10px 8px 10px 14px;padding-inline:14px 8px;border:0.5px solid var(--dsw-alias-border-l3,var(--dsw-alias-border-l2));border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-soft,var(--dsw-shadow-lv3));color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;animation:waycraft-mcp-toast-in .18s ease-out}
+.waycraft-mcp-toast-ok .waycraft-mcp-toast-icon{color:var(--dsw-alias-state-success-primary,var(--dsw-alias-label-primary))}
+.waycraft-mcp-toast-warn .waycraft-mcp-toast-icon{color:var(--dsw-alias-state-warning-primary)}
+.waycraft-mcp-toast-err .waycraft-mcp-toast-icon{color:var(--dsw-alias-state-error-primary)}
+.waycraft-mcp-toast-icon{display:inline-flex;flex:none}
+.waycraft-mcp-toast-text{flex:1;min-inline-size:0;overflow-wrap:anywhere}
+@keyframes waycraft-mcp-toast-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.waycraft-mcp-toast{animation:none}}
 .waycraft-mcp-confirm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;border:0.5px solid var(--dsw-alias-state-error-primary, var(--dsw-alias-border-l2));border-radius:10px}
 /* ===== Guided Add/Edit dialog (#174 A) ===== */
 .waycraft-mcp-overlay{position:fixed;inset:0;z-index:1000;container-type:normal;max-inline-size:none;inline-size:auto;display:flex;align-items:center;justify-content:center;padding:16px;background:color-mix(in srgb,var(--dsw-alias-bg-base) 60%,transparent);overflow:auto}
@@ -940,10 +964,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         h('span', { className: 'waycraft-mcp-meta' }, t('preview')),
         h('pre', { className: 'waycraft-mcp-pre' }, JSON.stringify(redactForPreview(buildConfig(f)), null, 2))),
       serverError ? h('p', { role: 'alert', className: 'waycraft-mcp-alert' }, serverError) : null,
-      confirmDiscard ? h('div', { className: 'waycraft-mcp-confirm', role: 'alertdialog', 'aria-label': t('dirtyCancel') },
-        h('span', null, t('dirtyCancel')),
-        h('button', { type: 'button', className: 'waycraft-mcp-danger', onClick: props.onClose }, t('discard')),
-        h('button', { type: 'button', onClick: () => setConfirmDiscard(false) }, t('keepEditing'))) : null);
+      confirmDiscard ? h(ConfirmDialog, { title: t('dirtyCancel'), message: t('dirtyCancelBody'), confirmLabel: t('discard'), danger: true, onConfirm: props.onClose, onCancel: () => setConfirmDiscard(false) }) : null);
     const footer = h('div', { className: 'waycraft-mcp-dialog-footer' },
       h('button', { type: 'button', onClick: requestClose }, t('cancel')),
       h('button', { type: 'button', className: 'waycraft-mcp-primary', disabled: saving, 'aria-disabled': hasErrors ? true : undefined, onClick: () => void save() }, saving ? t('saving') : t('saveServer')));
@@ -954,6 +975,64 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     // Portal to body: the panel's container-type ancestor would otherwise clip the position:fixed overlay.
     const host = portalTarget();
     return host ? host.dom.createPortal(overlay, host.body) : overlay;
+  }
+
+  // Shared modal behaviour: focus in on open, Tab trapped, Escape closes, focus returns to the opener.
+  function useModal(onEscape: () => void) {
+    const ref = React.useRef(null as any);
+    const [opener] = React.useState(() => (typeof document !== 'undefined' ? document.activeElement : null) as any);
+    React.useEffect(() => {
+      const first = ref.current?.querySelector?.('.waycraft-mcp-dialog-footer button:not([disabled])');
+      (first || ref.current)?.focus?.();
+      return () => { try { opener?.focus?.(); } catch { /* opener may be gone */ } };
+    }, []);
+    const onKeyDown = (event: any) => {
+      if (event.key === 'Escape') { event.stopPropagation?.(); onEscape(); return; }
+      if (event.key !== 'Tab') return;
+      const items: any[] = Array.from(ref.current?.querySelectorAll?.('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])') || []);
+      if (!items.length) return;
+      const index = items.indexOf(event.target);
+      const back = event.shiftKey && index <= 0;
+      const forward = !event.shiftKey && (index === -1 || index === items.length - 1);
+      if (back || forward) { event.preventDefault?.(); (back ? items[items.length - 1] : items[0]).focus?.(); }
+    };
+    return { ref, onKeyDown };
+  }
+
+  // A small modal confirmation (same shell as the Add/Edit dialog) for trash, restore, permanent delete and discard.
+  function ConfirmDialog(props: { title: string; message: string; confirmLabel: string; danger?: boolean; busy?: boolean; onConfirm: () => void; onCancel: () => void }) {
+    const { ref, onKeyDown } = useModal(props.onCancel);
+    const overlay = h('div', { className: 'waycraft-mcp waycraft-mcp-overlay', dir: isArabic() ? 'rtl' : 'ltr', onMouseDown: (e: any) => { if (e.target === e.currentTarget) props.onCancel(); } },
+      h('div', { role: 'alertdialog', 'aria-modal': true, 'aria-labelledby': 'waycraft-mcp-confirm-title', 'aria-describedby': 'waycraft-mcp-confirm-msg', className: 'waycraft-mcp-dialog waycraft-mcp-dialog-sm', ref, tabIndex: -1, onKeyDown },
+        h('div', { className: 'waycraft-mcp-dialog-head' }, h('h3', { id: 'waycraft-mcp-confirm-title' }, props.title)),
+        h('div', { className: 'waycraft-mcp-dialog-body' }, h('p', { id: 'waycraft-mcp-confirm-msg', className: 'waycraft-mcp-confirm-msg' }, props.message)),
+        h('div', { className: 'waycraft-mcp-dialog-footer' },
+          h('button', { type: 'button', disabled: !!props.busy, onClick: props.onCancel }, t('cancel')),
+          h('button', { type: 'button', className: props.danger ? 'waycraft-mcp-danger-solid' : 'waycraft-mcp-primary', disabled: !!props.busy, onClick: props.onConfirm }, props.confirmLabel))));
+    const host = portalTarget();
+    return host ? host.dom.createPortal(overlay, host.body) : overlay;
+  }
+
+  // Transient feedback: successes and warnings clear themselves; errors stay until dismissed.
+  function Toast(props: { notice: any; onDismiss: () => void }) {
+    const { notice, onDismiss } = props;
+    React.useEffect(() => {
+      if (!notice || notice.kind === 'err') return undefined;
+      const id = setTimeout(onDismiss, notice.kind === 'warn' ? 9000 : 5000);
+      return () => clearTimeout(id);
+    }, [notice]);
+    if (!notice) return null;
+    const kind = notice.kind === 'err' ? 'err' : notice.kind === 'warn' ? 'warn' : 'ok';
+    const glyph = kind === 'ok'
+      ? h('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5' }))
+      : h('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' }, h('path', { d: 'M12 8v5M12 16.5v.01' }), h('circle', { cx: 12, cy: 12, r: 9 }));
+    const node = h('div', { className: 'waycraft-mcp waycraft-mcp-toasts', dir: isArabic() ? 'rtl' : 'ltr' },
+      h('div', { role: kind === 'err' ? 'alert' : 'status', className: `waycraft-mcp-toast waycraft-mcp-toast-${kind}${kind === 'warn' ? ' waycraft-mcp-alert-warn' : ''}` },
+        h('span', { className: 'waycraft-mcp-toast-icon' }, glyph),
+        h('span', { className: 'waycraft-mcp-toast-text' }, notice.text, notice.code ? h('bdi', { dir: 'ltr', className: 'waycraft-mcp-toast-code' }, ` (${notice.code})`) : null),
+        h('button', { type: 'button', className: 'waycraft-mcp-icon-btn', 'aria-label': t('dismiss'), onClick: onDismiss }, h('svg', { viewBox: '0 0 24 24', width: 14, height: 14, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', 'aria-hidden': 'true' }, h('path', { d: 'M6 6l12 12M18 6L6 18' })))));
+    const host = portalTarget();
+    return host ? host.dom.createPortal(node, host.body) : node;
   }
 
   function McpPanel() {
@@ -1036,11 +1115,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     if (state.kind === 'unauthorized') return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr' }, h('style', null, STYLE), h('p', { role: 'alert' }, t('unauthorized')));
     if (state.kind === 'error') return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr' }, h('style', null, STYLE), h('p', { role: 'alert' }, t('error')), h('p', { className: 'waycraft-mcp-note' }, ltr(state.message||'')), h('button', { type: 'button', onClick: load }, t('retry')));
 
-    const confirmUi = confirm ? h('div', { className: 'waycraft-mcp-confirm', role: 'alertdialog', 'aria-label': confirm.label },
-      h('span', null, confirm.label),
-      h('button', { type: 'button', className: confirm.danger ? 'waycraft-mcp-danger' : '', disabled: !!busy, onClick: () => { const c=confirm; setConfirmState(null); void run(c.label, c.fn); } }, t('confirm')),
-      h('button', { type: 'button', disabled: !!busy, onClick: () => setConfirmState(null) }, t('cancel')),
-    ) : null;
+    const confirmUi = confirm ? h(ConfirmDialog, { title: confirm.title || t('confirm'), message: confirm.label, confirmLabel: confirm.confirmLabel || t('confirm'), danger: !!confirm.danger, busy: !!busy,
+      onCancel: () => setConfirmState(null), onConfirm: () => { const c = confirm; setConfirmState(null); void run(c.label, c.fn, c.success ? () => ({ kind: 'ok', text: c.success }) : undefined); } }) : null;
 
     const renderCandidate = (c:any, key:string) => h('li', { key, className: 'waycraft-mcp-panel' },
       h('div', { className: 'waycraft-mcp-row' },
@@ -1180,8 +1256,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
           ...headBadges,
           inTrash
             ? h(React.Fragment, null,
-                h('button', { type: 'button', disabled: !!busy, onClick: () => setConfirmState({ label: `${t('restore')}: ${s.serverName}?`, fn: () => rpc('restore', { serverName: s.serverName, expectedFingerprint: fingerprint }) }) }, t('restore')),
-                h('button', { type: 'button', className: 'waycraft-mcp-danger', disabled: !!busy, onClick: () => setConfirmState({ label: t('confirmPermanent'), danger: true, fn: () => rpc('permanent_delete', { serverName: s.serverName, expectedFingerprint: fingerprint, confirm: true }) }) }, t('permanentDelete')))
+                h('button', { type: 'button', disabled: !!busy, onClick: () => setConfirmState({ success: `${t('toastRestored')}: ${s.serverName}`, title: t('restore'), confirmLabel: t('restore'), label: `${t('restore')}: ${s.serverName}?`, fn: () => rpc('restore', { serverName: s.serverName, expectedFingerprint: fingerprint }) }) }, t('restore')),
+                h('button', { type: 'button', className: 'waycraft-mcp-danger', disabled: !!busy, onClick: () => setConfirmState({ success: `${t('toastDeleted')}: ${s.serverName}`, title: t('permanentDelete'), confirmLabel: t('permanentDelete'), label: t('confirmPermanent'), danger: true, fn: () => rpc('permanent_delete', { serverName: s.serverName, expectedFingerprint: fingerprint, confirm: true }) }) }, t('permanentDelete')))
             : switchControl({ checked: !s.disabled, disabled: !!busy, label: `${t('configEnabled')}: ${s.serverName}`, title: t('configOffHelp'), onToggle: () => void run('config-off', () => rpc('update', { serverName: s.serverName, expectedFingerprint: fingerprint, patch: { disabled: !s.disabled } })), bare: true })),
         open ? h('div', { className: 'waycraft-mcp-card-body' },
           h('div', { className: 'waycraft-mcp-actions' },
@@ -1190,7 +1266,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
             h('button', { type: 'button', disabled: !!busy, onClick: () => openEdit(s) }, t('editServer')),
             needsTrust ? h('button', { type: 'button', className: 'waycraft-mcp-primary', disabled: !!busy, onClick: () => void run('trust', () => rpc('approve_trust', { serverName: s.serverName, reviewedConfigFingerprint: s.reviewedConfigFingerprint, expectedFingerprint: fingerprint })) }, t('approveTrust')) : null,
             h('span', { className: 'waycraft-mcp-spacer' }),
-            h('button', { type: 'button', className: 'waycraft-mcp-danger', disabled: !!busy, onClick: () => setConfirmState({ label: t('confirmTrash'), danger: true, fn: () => rpc('trash', { serverName: s.serverName, expectedFingerprint: fingerprint }) }) }, t('moveToTrash'))),
+            h('button', { type: 'button', className: 'waycraft-mcp-danger', disabled: !!busy, onClick: () => setConfirmState({ success: `${t('toastTrashed')}: ${s.serverName}`, title: t('moveToTrash'), confirmLabel: t('moveToTrash'), label: t('confirmTrash'), danger: true, fn: () => rpc('trash', { serverName: s.serverName, expectedFingerprint: fingerprint }) }) }, t('moveToTrash'))),
           detailBody(s)) : null);
     };
 
@@ -1257,7 +1333,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr', 'data-waycraft-mcp-ui': '175' },
       h('style', null, STYLE),
       h('div', { className: 'waycraft-mcp-header' }, h('h2', { className: 'waycraft-mcp-title' }, t('title'))),
-      notice ? h('p', { role: notice.kind==='err'?'alert':'status', className: 'waycraft-mcp-alert' + (notice.kind==='warn' ? ' waycraft-mcp-alert-warn' : '') }, notice.text, notice.code ? ` (${notice.code})` : '') : null,
+      h(Toast, { notice, onDismiss: () => setNotice(null) }),
       confirmUi,
       h('div', { className: 'waycraft-mcp-seg', role: 'tablist', 'aria-label': t('title') },
         [['servers',t('areaServers')],['discover',t('areaDiscoverImport')],['trash',t('areaTrash')]].map(([id,label]:any)=>h('button',{key:id,type:'button',role:'tab','aria-selected':area===id,tabIndex:area===id?0:-1,onClick:()=>setArea(id)},label, id==='trash' && trashed.length ? h('span',{className:'waycraft-mcp-badge'},trashed.length) : ''))),

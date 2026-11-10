@@ -50,6 +50,23 @@ describe('MCP manager in a real browser', { skip }, () => {
     await page.close();
   });
 
+  test('Move to Trash asks in a modal dialog, Escape cancels and returns focus, confirming shows a toast', async () => {
+    const page = await open();
+    await page.locator('.waycraft-mcp-row-toggle').first().click();
+    const opener = page.locator('.waycraft-mcp-danger').first();
+    await opener.click();
+    assert.ok(await page.locator('[role=alertdialog]').isVisible());
+    assert.ok(await page.evaluate(() => !!document.activeElement.closest('[role=alertdialog]')), 'focus moves into the dialog');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('[role=alertdialog]').count(), 0);
+    assert.ok(await page.evaluate(() => document.activeElement.classList.contains('waycraft-mcp-danger')), 'focus returns to the opener');
+    await page.locator('.waycraft-mcp-danger').first().click();
+    await page.locator('.waycraft-mcp-dialog-footer button').last().click();
+    await page.waitForSelector('.waycraft-mcp-toast');
+    assert.match(await page.locator('.waycraft-mcp-toast').textContent(), /Moved to Trash/);
+    await page.close();
+  });
+
   test('no section when the component route is not served (component disabled)', async () => {
     const s = await startMcpServer({ noRoute: true });
     const page = await browser.newPage();

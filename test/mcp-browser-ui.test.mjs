@@ -695,11 +695,11 @@ test('#175 P2-2 EN: a partial registration shows a warning instead of the generi
   const partial = await registerImport({ registered: 1, replaced: 0, skipped: 0, rejected: 1, failed: 0 }, 207);
   assert.ok(findAll(partial.toJSON(), n => n.props?.role === 'status' && /waycraft-mcp-alert-warn/.test(n.props?.className || '')).length > 0, 'warning notice shown');
   assert.match(allText(partial.toJSON()), /Registration finished with issues/);
-  assert.equal(findAll(partial.toJSON(), n => n.type === 'p' && allText(n) === 'Done.').length, 0, 'no generic success for a partial import');
+  assert.equal(findAll(partial.toJSON(), n => n.props?.role === 'status' && allText(n).trim() === 'Done.').length, 0, 'no generic success for a partial import');
   partial.unmount();
 
   const clean = await registerImport({ registered: 1, replaced: 0, skipped: 0, rejected: 0, failed: 0 }, 200);
-  assert.equal(findAll(clean.toJSON(), n => n.type === 'p' && allText(n) === 'Done.').length, 1, 'clean import keeps the success notice');
+  assert.equal(findAll(clean.toJSON(), n => n.props?.role === 'status' && allText(n).trim() === 'Done.').length, 1, 'clean import keeps the success notice');
   assert.equal(findAll(clean.toJSON(), n => /waycraft-mcp-alert-warn/.test(n.props?.className || '')).length, 0);
   clean.unmount();
 });
