@@ -1,7 +1,42 @@
 # Changelog
 
 
-## Unreleased
+Entries written before the rename may use the retired product name (`majed`) and its identifiers; the current names are documented in `docs/ai/rename-waycraft.md`.
+
+All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.4.0] - 2026-11-11
+
+Release summary: adds the **MCP manager** Component (Loader row `waycraft-mcp`, default off), V1 of spec #177 (PR #204).
+
+### Added
+
+- MCP manager in Settings: add, edit, trash, restore and permanently delete MCP server configurations (stdio and streamable HTTP), with validation, a masked configuration preview and `${credential:REF}` credential references instead of plaintext secrets.
+- Trust bound to the reviewed configuration, an explicit trust-gated connection test, and a read-only tool list cache with freshness.
+- JSON import with a preview and explicit registration, filesystem discovery candidates, and on-demand search of the Official MCP Registry. Nothing connects, installs packages or grants trust automatically.
+- English and Arabic (RTL) UI.
+
+### Changed
+
+- `@modelcontextprotocol/sdk` is a runtime dependency, used only for the explicit connection test.
+- The browser bundle now carries the MCP browser half. Errors during MCP setup are caught and logged instead of being thrown.
+
+### Evidence and limitations
+
+- `npm run ci` passes at the release commit: tests, format, lint, TypeScript and a byte-exact fresh build. GitHub checks passed on PR #204.
+- Installed desktop checks covered CRUD, import, Registry search and dialog focus on an earlier candidate. The Owner accepted Gate 3 and closed #176. Not live-verified on this exact build: the tab keyboard navigation and the Registry focus fix.
+- One real-browser check (More menu "fits viewport") fails locally with Chromium headless shell 1243. It predates this release and is open.
+- The "Configured off" switch records configuration only: DSH runtime enforcement of a disabled server is not verified.
+- Deferred, not included: per-tool enable/disable enforcement, project-scoped servers, and policy enforcement after the Component is shut down.
+
+### Upgrade, restart and rollback
+
+- Host files change: fully restart DSH after updating, then enable **MCP manager** on the Plugins page.
+- Rollback: reinstall 0.3.1 through the plugin manager and restart. MCP server entries saved by the manager stay in DSH's configuration after a rollback.
+
+### Development entries
 
 - MCP area and server-detail tabs now move focus and selection together with Left/Right arrows (mirrored in Arabic RTL), Home and End. Component regressions cover keyboard handler semantics; real-browser focus verification remains pending.
 
@@ -20,12 +55,6 @@
 - Added the **Waycraft MCP Manager** V1 component (`waycraft-mcp`, default off): Owner-authorized server-centric MCP configuration with safe persistence, read-only tool enumeration cache/freshness, explicit trust-gated connection testing, JSON import preview/explicit registration, filesystem discovery candidates, trash/restore/permanent delete, credential-reference safety (no plaintext secret leakage in observable surfaces), and EN/AR RTL settings UI. Deferred from V1: per-tool runtime enforcement, strict project isolation, and shutdown-persistence enforcement.
 - MCP manager: guided Add/Edit server form (stdio and streamable HTTP) with live validation, masked config preview and plaintext-secret warnings; honest Saved / runtime-application / Test status; plain-language import results; the per-row switch is relabelled "Configured off" because DSH runtime enforcement is unverified; non-secret HTTP headers (for example `Content-Type`) no longer require a credential reference; added `mcp/locale` package metadata. Fixed the settings section disappearing after install (`mcp.applyMcp`).
 - MCP manager UI now follows the Skill manager layout (stats strip, collapsed expandable server rows, joined icon bar, aligned inputs) and its settings section is hidden while the `waycraft-mcp` component is disabled, using the same host presence check as the Skill manager. The MCP manager now follows the Skill manager layout: icon tabs, three filter selects, search with a joined icon bar, a stats strip, and rows that carry the test, edit, approve-trust and trash actions plus the switch directly in the collapsed row. Edit appears once per server, the details tabs match the Skill manager style, and the "About this manager" block is gone. A connection test no longer fails with an empty HTTP 400 when the host has no `mcpManager` service. Trash, restore, permanent delete and discard now confirm in a modal dialog, and results appear as toasts (errors stay until dismissed) instead of inline text. Added opt-in real-browser checks (`test/browser/mcp-ui.browser.mjs`).
-
-Entries written before the rename may use the retired product name (`majed`) and its identifiers; the current names are documented in `docs/ai/rename-waycraft.md`.
-
-All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
-
-## [Unreleased]
 
 ## [0.3.1] - 2026-11-07
 
@@ -182,7 +211,8 @@ First Waycraft npm release; see [final release scope, upgrade and limitations](d
 
 Baseline for the component-by-component plan. Features: Bidirectional text, App UI font size, App font with bundled fonts, System notifications, sidebar actions grouped in the account menu, Copy on select, and the composer Approvals dropdown with the deterministic command classifier. See `README.md`.
 
-[Unreleased]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.2.1...v0.2.2
