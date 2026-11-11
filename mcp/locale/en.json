@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Waycraft MCP manager",
+    "description": "Manage MCP server configuration, connection tests, read-only tool lists, import, discovery and trash. Disabled by default."
+  }
+}

@@ -1276,6 +1276,11 @@ test('assembled core entry completes registrations when Subscriptions setup thro
       Error,
       setInterval() {},
       clearInterval() {},
+      // This registration fixture does not run presence polling or acquire live timers.
+      setTimeout() {
+        return { unref() {} };
+      },
+      clearTimeout() {},
     });
     const subscriptions = {
       get() {
@@ -1350,14 +1355,16 @@ test('assembled core entry completes registrations when Subscriptions setup thro
     assert.ok(registrations.includes('waycraft-notifications'), failure);
     assert.ok(registrations.includes('waycraft-ui-font-size'), failure);
     assert.ok(effects.includes('dsh-waycraft: apply settings'), failure);
-    // The independent Skill manager component may log its own isolated setup failure; Subscriptions reports exactly one.
+    // Independent managers may log isolated setup failures; Subscriptions reports exactly one.
     const subscriptionErrors = errors.filter(([message]) =>
       /^dsh-waycraft: Subscriptions/.test(message),
     );
     assert.equal(subscriptionErrors.length, 1, failure);
     assert.ok(
       errors.every(([message]) =>
-        /^dsh-waycraft: (Subscriptions|Skill manager)/.test(message),
+        /^dsh-waycraft: (Subscriptions|Skill manager|MCP manager)/.test(
+          message,
+        ),
       ),
       failure,
     );

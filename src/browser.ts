@@ -1,8 +1,9 @@
 // Independently implemented presence lifecycle; reference recipe and slot conventions only.
 import { legacyToolviewKey } from './legacy-names.js';
 import { applySkills } from './skills-browser.js';
+import { applyMcp } from './mcp-browser.js';
 
-export { applySkills };
+export { applySkills, applyMcp };
 
 import {
   ImageGenerateToolview,

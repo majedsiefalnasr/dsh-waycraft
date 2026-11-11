@@ -16,6 +16,15 @@
     "src/auth/**/*.ts",
     "src/providers/**/*.ts",
     "src/translate/**/*.ts",
-    "src/tools/**/*.ts"
+    "src/tools/**/*.ts",
+    "src/mcp.ts",
+    "src/mcp-schema.ts",
+    "src/mcp-config-store.ts",
+    "src/mcp-credentials.ts",
+    "src/mcp-trust.ts",
+    "src/mcp-connection-test.ts",
+    "src/mcp-tool-cache.ts",
+    "src/mcp-import.ts",
+    "src/mcp-discovery.ts"
   ]
 }
