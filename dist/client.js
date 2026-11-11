@@ -13344,11 +13344,46 @@ function applySubscriptions(root) {
 				"aria-label": t("freeProviders")
 			}, h("h3", { className: "waycraft-provider-title" }, t("freeProviders")), h("ul", { className: "waycraft-api-rows" }, h("li", null, h(ZenCard)))));
 		}
+		/**
+		* The 3 s heartbeat is the only timer. A probe that last got "not there" (or an unusable answer) sits out
+		* heartbeats instead of owning a timer, so nothing extra needs clearing on dispose and a browser that prints
+		* every 404 stops printing one every 3 s: the first re-check comes after 30 s, then once a minute.
+		*/
+		const HEARTBEATS_PER_MINUTE = 20;
+		const FIRST_RECHECK_HEARTBEATS = 10;
+		const pacer = () => {
+			let skip = 0;
+			let misses = 0;
+			return {
+				due: () => {
+					if (skip === 0) return true;
+					skip--;
+					return false;
+				},
+				missed: () => {
+					skip = (misses === 0 ? FIRST_RECHECK_HEARTBEATS : HEARTBEATS_PER_MINUTE) - 1;
+					misses++;
+				},
+				settled: () => {
+					misses = 0;
+					skip = HEARTBEATS_PER_MINUTE - 1;
+				},
+				reset: () => {
+					misses = 0;
+					skip = 0;
+				}
+			};
+		};
+		/** The public RPC transport exposes the HTTP status in this exact error string. */
+		const isHttp404 = (error, route) => error instanceof Error && error.message === `transport failure for /api/${route}: HTTP 404`;
+		const statusPace = pacer();
+		const referencePace = pacer();
 		let present = false;
 		let failing = false;
 		let referenceEnabled = false;
 		let disposed = false;
 		let sequence = 0;
+		let referenceSequence = 0;
 		let withdraw;
 		function Section() {
 			React.useSyncExternalStore((fn) => {
@@ -13525,44 +13560,60 @@ function applySubscriptions(root) {
 		}
 		async function probe() {
 			const current = ++sequence;
-			probeReference(current);
 			try {
 				const result = await connection.rpc.call("/api", "waycraft-subscriptions.status", {});
 				if (disposed || current !== sequence) return;
 				present = true;
 				failing = !(result?.ok && result.value?.component === "subscriptions");
+				statusPace.reset();
 			} catch (error) {
 				if (disposed || current !== sequence) return;
-				if (error instanceof Error && error.message === "transport failure for /api/waycraft-subscriptions.status: HTTP 404") {
+				if (isHttp404(error, "waycraft-subscriptions.status")) {
 					present = false;
 					failing = false;
+					statusPace.missed();
 				} else {
 					present = true;
 					failing = true;
+					statusPace.reset();
 				}
 			}
 			isolate(update);
 		}
-		async function probeReference(current) {
-			let enabled = false;
+		async function probeReference() {
+			const current = ++referenceSequence;
+			let answer;
 			try {
-				enabled = (await connection.rpc.call("/api", "subscriptions-auth.proxyGet", {}))?.ok === true;
-			} catch {}
-			if (disposed || current !== sequence) return;
-			referenceEnabled = enabled;
+				if ((await connection.rpc.call("/api", "subscriptions-auth.proxyGet", {}))?.ok === true) answer = true;
+			} catch (error) {
+				if (isHttp404(error, "subscriptions-auth.proxyGet")) answer = false;
+			}
+			if (disposed || current !== referenceSequence) return;
+			if (answer === true) referencePace.settled();
+			else referencePace.missed();
+			if (answer === void 0 || answer === referenceEnabled) return;
+			referenceEnabled = answer;
 			isolate(update);
 		}
 		isolate(() => ctx.effect(() => isolate(() => {
 			probe();
+			probeReference();
 			const unsubscribe = connection.state.subscribe(() => {
-				if (connection.state.getSnapshot() === "connected") probe();
+				if (connection.state.getSnapshot() === "connected") {
+					statusPace.reset();
+					referencePace.reset();
+					probe();
+					probeReference();
+				}
 			});
 			const timer = setInterval(() => {
-				probe();
+				if (statusPace.due()) probe();
+				if (referencePace.due()) probeReference();
 			}, 3e3);
 			return () => {
 				disposed = true;
 				sequence++;
+				referenceSequence++;
 				clearInterval(timer);
 				unsubscribe();
 				isolate(syncSurfaces);
