@@ -80,12 +80,14 @@ function browser(locale = 'en', initialAnswer, options = {}) {
     clearInterval: (fn) => timers.delete(fn),
     Error,
   });
+  let referenceCalls = 0;
+  let statusCalls = 0;
   const connection = {
     rpc: {
       call: (...args) =>
         args[1] === 'subscriptions-auth.proxyGet'
-          ? referenceAnswer(...args)
-          : answer(...args),
+          ? (referenceCalls++, referenceAnswer(...args))
+          : (statusCalls++, answer(...args)),
     },
     state: {
       subscribe: (fn) => {
@@ -178,6 +180,22 @@ function browser(locale = 'en', initialAnswer, options = {}) {
       for (const fn of [...timers]) fn();
     },
     tick: () => timer(),
+    /** `count` heartbeats of the 3 second interval (10 heartbeats are 30 s), letting each answer land first. */
+    async ticks(count) {
+      for (let beat = 0; beat < count; beat++) {
+        timer();
+        await new Promise((done) => setImmediate(done));
+      }
+    },
+    get referenceCalls() {
+      return referenceCalls;
+    },
+    get statusCalls() {
+      return statusCalls;
+    },
+    get timerCount() {
+      return timers.size;
+    },
     reconnect: () => reconnect(),
     async settle() {
       await Promise.resolve();
@@ -263,17 +281,17 @@ test('actual public and alias video outlets recover after reference withdrawal a
       await act(async () => renderer.unmount());
     }
     page.setReferenceAnswer(() => Promise.resolve({ ok: true }));
-    page.tick();
+    page.reconnect();
     await page.settle();
     assert.ok(!page.surfaces.some((id) => id.includes('toolview')));
     page.setReferenceAnswer(() =>
       Promise.reject(
         new Error(
-          'transport failure for /api/waycraft-subscriptions.status: HTTP 404',
+          'transport failure for /api/subscriptions-auth.proxyGet: HTTP 404',
         ),
       ),
     );
-    page.tick();
+    page.reconnect();
     await page.settle();
     assert.ok(page.live.has('waycraft-toolview-dsh_waycraft_video_generate'));
     page.setAnswer(() =>
@@ -283,13 +301,13 @@ test('actual public and alias video outlets recover after reference withdrawal a
         ),
       ),
     );
-    page.tick();
+    page.reconnect();
     await page.settle();
     assert.ok(!page.live.has('waycraft-toolview-video_generate'));
     page.setAnswer(() =>
       Promise.resolve({ ok: true, value: { component: 'subscriptions' } }),
     );
-    page.tick();
+    page.reconnect();
     await page.settle();
     assert.ok(page.live.has('waycraft-toolview-video_generate'));
   } finally {
@@ -1425,7 +1443,7 @@ for (const locale of ['en', 'ar']) {
       page.section.options.label(),
       locale === 'en' ? 'AI Providers' : 'موفّرو الذكاء الاصطناعي',
     );
-    page.tick();
+    page.reconnect();
     await page.settle();
     assert.equal(page.registrations, 1);
     page.setReferenceAnswer(() =>
@@ -1435,7 +1453,7 @@ for (const locale of ['en', 'ar']) {
         ),
       ),
     );
-    page.tick();
+    page.reconnect();
     await page.settle();
     assert.equal(notice(), undefined);
     page.cleanup();
@@ -1455,11 +1473,8 @@ for (const response of [
   test('unknown reference probe never displays a notice or blocks our section', async () => {
     const page = browser();
     await page.settle();
-    page.setReferenceAnswer(() => Promise.resolve({ ok: true }));
-    page.tick();
-    await page.settle();
     page.setReferenceAnswer(response);
-    page.tick();
+    page.reconnect();
     await page.settle();
     assert.ok(page.section);
     assert.equal(
@@ -1483,7 +1498,7 @@ test('reference responses after a newer probe or disposal are ignored', async ()
         resolve = done;
       }),
   );
-  page.tick();
+  page.reconnect();
   page.setReferenceAnswer(() =>
     Promise.reject(
       new Error(
@@ -1491,7 +1506,7 @@ test('reference responses after a newer probe or disposal are ignored', async ()
       ),
     ),
   );
-  page.tick();
+  page.reconnect();
   await page.settle();
   resolve({ ok: true });
   await page.settle();
@@ -1508,7 +1523,7 @@ test('reference responses after a newer probe or disposal are ignored', async ()
         resolve = done;
       }),
   );
-  page.tick();
+  page.reconnect();
   page.cleanup();
   resolve({ ok: true });
   await page.settle();
@@ -1606,7 +1621,7 @@ test('composer surfaces register with waycraft ids while present and withdraw wh
       ),
     ),
   );
-  page.tick();
+  page.reconnect();
   await page.settle();
   assert.deepEqual(
     page.surfaces,
@@ -1616,7 +1631,7 @@ test('composer surfaces register with waycraft ids while present and withdraw wh
   page.setAnswer(() =>
     Promise.resolve({ ok: true, value: { component: 'subscriptions' } }),
   );
-  page.tick();
+  page.reconnect();
   await page.settle();
   assert.deepEqual(
     page.surfaces,
@@ -1631,7 +1646,7 @@ test('composer surfaces are withdrawn while the reference plugin serves and retu
   await page.settle();
   assert.deepEqual(page.surfaces, SURFACES);
   page.setReferenceAnswer(() => Promise.resolve({ ok: true, value: {} }));
-  page.tick();
+  page.reconnect();
   await page.settle();
   assert.deepEqual(page.surfaces, []);
   assert.ok(
@@ -1645,7 +1660,7 @@ test('composer surfaces are withdrawn while the reference plugin serves and retu
       ),
     ),
   );
-  page.tick();
+  page.reconnect();
   await page.settle();
   assert.deepEqual(page.surfaces, SURFACES);
 });
@@ -2030,3 +2045,211 @@ for (const provider of ['codex', 'claude', 'grok', 'antigravity', 'copilot'])
       page.cleanup();
     }
   });
+
+// #207: the 3 s heartbeat reconciles presence, but an answer that is a settled "no" must not be asked again every 3 s
+// (the browser prints each 404), and a failed probe of the reference plugin must not read as "the reference is off".
+const REFERENCE_404 = () =>
+  Promise.reject(
+    new Error(
+      'transport failure for /api/subscriptions-auth.proxyGet: HTTP 404',
+    ),
+  );
+const REFERENCE_ON = () => Promise.resolve({ ok: true, value: {} });
+const STATUS_404 = () =>
+  Promise.reject(
+    new Error(
+      'transport failure for /api/waycraft-subscriptions.status: HTTP 404',
+    ),
+  );
+const referenceNotice = (page) =>
+  page.section
+    .component()
+    .children.flat()
+    .find((node) => node?.props?.role === 'status');
+const MINUTE = 20; // heartbeats
+
+test('an absent reference plugin is asked at most twice in a minute', async () => {
+  const page = browser();
+  await page.settle();
+  await page.ticks(MINUTE);
+  assert.ok(
+    page.referenceCalls <= 2,
+    `${page.referenceCalls} reference requests in 60 s`,
+  );
+  await page.ticks(MINUTE);
+  assert.ok(
+    page.referenceCalls <= 3,
+    `${page.referenceCalls} reference requests in 120 s`,
+  );
+  page.cleanup();
+});
+
+test('an absent component is asked at most twice in a minute and stays absent', async () => {
+  const page = browser('en', STATUS_404);
+  await page.settle();
+  await page.ticks(MINUTE);
+  assert.ok(
+    page.statusCalls <= 2,
+    `${page.statusCalls} status requests in 60 s`,
+  );
+  const steady = page.statusCalls;
+  await page.ticks(MINUTE);
+  assert.ok(
+    page.statusCalls - steady <= 1,
+    `${page.statusCalls - steady} status requests in the next 60 s`,
+  );
+  assert.equal(page.section, undefined);
+  page.cleanup();
+});
+
+test('a present component is still reconciled on every heartbeat', async () => {
+  const page = browser();
+  await page.settle();
+  const before = page.statusCalls;
+  await page.ticks(5);
+  assert.equal(page.statusCalls, before + 5);
+  page.cleanup();
+});
+
+for (const [failure, answer] of [
+  ['network error', () => Promise.reject(new Error('offline'))],
+  ['timeout', () => Promise.reject(new Error('timeout'))],
+  [
+    '5xx',
+    () =>
+      Promise.reject(
+        new Error(
+          'transport failure for /api/subscriptions-auth.proxyGet: HTTP 503',
+        ),
+      ),
+  ],
+  ['malformed answer', () => Promise.resolve(null)],
+  ['refusal', () => Promise.resolve({ ok: false })],
+]) {
+  test(`a reference that was running stays running through a ${failure}`, async () => {
+    const page = browser();
+    await page.settle();
+    page.setReferenceAnswer(REFERENCE_ON);
+    page.reconnect();
+    await page.settle();
+    assert.ok(referenceNotice(page));
+    page.setReferenceAnswer(answer);
+    page.reconnect();
+    await page.settle();
+    assert.ok(referenceNotice(page), 'notice survives the failed probe');
+    await page.ticks(MINUTE);
+    assert.ok(referenceNotice(page), 'and keeps surviving the retries');
+    page.cleanup();
+  });
+}
+
+test('a reference that was running and now answers 404 is off', async () => {
+  const page = browser();
+  await page.settle();
+  page.setReferenceAnswer(REFERENCE_ON);
+  page.reconnect();
+  await page.settle();
+  assert.ok(referenceNotice(page));
+  page.setReferenceAnswer(REFERENCE_404);
+  page.reconnect();
+  await page.settle();
+  assert.equal(referenceNotice(page), undefined);
+  page.cleanup();
+});
+
+test('a running reference is re-checked at most once a minute and its switch-off is noticed without a reconnect', async () => {
+  const page = browser();
+  await page.settle();
+  page.setReferenceAnswer(REFERENCE_ON);
+  page.reconnect();
+  await page.settle();
+  const before = page.referenceCalls;
+  await page.ticks(MINUTE - 1);
+  assert.equal(page.referenceCalls, before, 'quiet until the minute is up');
+  page.setReferenceAnswer(REFERENCE_404);
+  await page.ticks(1);
+  assert.equal(page.referenceCalls, before + 1);
+  assert.equal(referenceNotice(page), undefined);
+  page.cleanup();
+});
+
+test('a failed reference probe is retried instead of trusted', async () => {
+  const page = browser();
+  await page.settle();
+  page.setReferenceAnswer(() => Promise.reject(new Error('offline')));
+  page.reconnect();
+  await page.settle();
+  assert.equal(referenceNotice(page), undefined);
+  page.setReferenceAnswer(REFERENCE_ON);
+  await page.ticks(10);
+  assert.ok(referenceNotice(page), 'the retry found the running reference');
+  page.cleanup();
+});
+
+test('a reconnect asks the reference again at once and starts the back-off over', async () => {
+  const page = browser();
+  await page.settle();
+  await page.ticks(2 * MINUTE); // deep into the steady one-a-minute cadence
+  const before = page.referenceCalls;
+  page.setReferenceAnswer(REFERENCE_ON);
+  page.reconnect();
+  await page.settle();
+  assert.equal(page.referenceCalls, before + 1, 'asked at once');
+  assert.ok(referenceNotice(page));
+  page.setReferenceAnswer(REFERENCE_404);
+  page.reconnect();
+  await page.settle();
+  const base = page.referenceCalls;
+  await page.ticks(9);
+  assert.equal(page.referenceCalls, base, 'first re-check is 30 s away');
+  await page.ticks(1);
+  assert.equal(page.referenceCalls, base + 1);
+  page.cleanup();
+});
+
+test('a reconnect asks a component that was absent again at once', async () => {
+  const page = browser('en', STATUS_404);
+  await page.settle();
+  await page.ticks(2 * MINUTE);
+  assert.equal(page.section, undefined);
+  page.setAnswer(() =>
+    Promise.resolve({ ok: true, value: { component: 'subscriptions' } }),
+  );
+  page.reconnect();
+  await page.settle();
+  assert.ok(page.section);
+  page.cleanup();
+});
+
+test('an absent component that appears is found within a minute without a reconnect', async () => {
+  const page = browser('en', STATUS_404);
+  await page.settle();
+  await page.ticks(2 * MINUTE);
+  page.setAnswer(() =>
+    Promise.resolve({ ok: true, value: { component: 'subscriptions' } }),
+  );
+  await page.ticks(MINUTE);
+  assert.ok(page.section);
+  page.cleanup();
+});
+
+test('disposal stops every timer and nothing updates afterwards', async () => {
+  const page = browser();
+  await page.settle();
+  assert.ok(page.timerCount > 0);
+  let resolveReference;
+  page.setReferenceAnswer(
+    () =>
+      new Promise((done) => {
+        resolveReference = done;
+      }),
+  );
+  page.reconnect();
+  page.cleanup();
+  assert.equal(page.timerCount, 0);
+  resolveReference(REFERENCE_ON());
+  await page.settle();
+  assert.equal(page.section, undefined);
+  await page.ticks(MINUTE);
+  assert.equal(page.section, undefined);
+});

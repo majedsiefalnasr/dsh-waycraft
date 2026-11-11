@@ -255,11 +255,54 @@ export function applySubscriptions(root: Context): void {
             ),
           );
         }
+        /**
+         * The 3 s heartbeat is the only timer. A probe that last got "not there" (or an unusable answer) sits out
+         * heartbeats instead of owning a timer, so nothing extra needs clearing on dispose and a browser that prints
+         * every 404 stops printing one every 3 s: the first re-check comes after 30 s, then once a minute.
+         */
+        const HEARTBEATS_PER_MINUTE = 20;
+        const FIRST_RECHECK_HEARTBEATS = 10;
+        const pacer = () => {
+          let skip = 0;
+          let misses = 0;
+          return {
+            /** Whether this heartbeat should run the probe. */
+            due: () => {
+              if (skip === 0) return true;
+              skip--;
+              return false;
+            },
+            /** The probe got "not there" or an answer it cannot use. */
+            missed: () => {
+              const wait =
+                misses === 0 ? FIRST_RECHECK_HEARTBEATS : HEARTBEATS_PER_MINUTE;
+              skip = wait - 1;
+              misses++;
+            },
+            /** The probe got a running answer; ask again in a minute. */
+            settled: () => {
+              misses = 0;
+              skip = HEARTBEATS_PER_MINUTE - 1;
+            },
+            /** Ask on the very next heartbeat and start the back-off over (a reconnect does this). */
+            reset: () => {
+              misses = 0;
+              skip = 0;
+            },
+          };
+        };
+        /** The public RPC transport exposes the HTTP status in this exact error string. */
+        const isHttp404 = (error: unknown, route: string) =>
+          error instanceof Error &&
+          error.message === `transport failure for /api/${route}: HTTP 404`;
+        const statusPace = pacer();
+        const referencePace = pacer();
         let present = false;
         let failing = false;
         let referenceEnabled = false;
         let disposed = false;
         let sequence = 0;
+        let referenceSequence = 0;
         let withdraw: Dispose | undefined;
         function Section() {
           React.useSyncExternalStore(
@@ -552,7 +595,6 @@ export function applySubscriptions(root: Context): void {
         }
         async function probe() {
           const current = ++sequence;
-          void probeReference(current);
           try {
             const result = await connection.rpc.call(
               '/api',
@@ -564,25 +606,27 @@ export function applySubscriptions(root: Context): void {
             failing = !(
               result?.ok && result.value?.component === 'subscriptions'
             );
+            statusPace.reset();
           } catch (error) {
             if (disposed || current !== sequence) return;
-            // The public RPC transport exposes HTTP status in this exact error string.
-            if (
-              error instanceof Error &&
-              error.message ===
-                'transport failure for /api/waycraft-subscriptions.status: HTTP 404'
-            ) {
+            if (isHttp404(error, 'waycraft-subscriptions.status')) {
               present = false;
               failing = false;
+              statusPace.missed();
             } else {
               present = true;
               failing = true;
+              statusPace.reset();
             }
           }
           isolate(update);
         }
-        async function probeReference(current: number) {
-          let enabled = false;
+        // Whether the reference plugin serves the same provider ids. Only a clear answer changes what is known: a
+        // running reference answers ok, a missing route is a 404, and anything else (network, 5xx, timeout, an
+        // unusable body) leaves the last known value alone, so a failed probe cannot flip the section on and off.
+        async function probeReference() {
+          const current = ++referenceSequence;
+          let answer: boolean | undefined;
           try {
             // Read-only sanitized local configuration; never retain or render its value.
             const result = await connection.rpc.call(
@@ -590,12 +634,15 @@ export function applySubscriptions(root: Context): void {
               'subscriptions-auth.proxyGet',
               {},
             );
-            enabled = result?.ok === true;
-          } catch {
-            // Missing route (404) is absent; other failures are unknown. Neither shows a notice.
+            if (result?.ok === true) answer = true;
+          } catch (error) {
+            if (isHttp404(error, 'subscriptions-auth.proxyGet')) answer = false;
           }
-          if (disposed || current !== sequence) return;
-          referenceEnabled = enabled;
+          if (disposed || current !== referenceSequence) return;
+          if (answer === true) referencePace.settled();
+          else referencePace.missed();
+          if (answer === undefined || answer === referenceEnabled) return;
+          referenceEnabled = answer;
           isolate(update);
         }
         isolate(() =>
@@ -603,17 +650,25 @@ export function applySubscriptions(root: Context): void {
             () =>
               isolate(() => {
                 void probe();
+                void probeReference();
                 const unsubscribe = connection.state.subscribe(() => {
-                  if (connection.state.getSnapshot() === 'connected')
+                  if (connection.state.getSnapshot() === 'connected') {
+                    statusPace.reset();
+                    referencePace.reset();
                     void probe();
+                    void probeReference();
+                  }
                 });
-                // Row switches do not reconnect the shared connection; periodically reconcile presence.
+                // Row switches do not reconnect the shared connection; periodically reconcile presence. Each probe
+                // paces itself on this one heartbeat (see `pacer`).
                 const timer = setInterval(() => {
-                  void probe();
+                  if (statusPace.due()) void probe();
+                  if (referencePace.due()) void probeReference();
                 }, 3000);
                 return () => {
                   disposed = true;
                   sequence++;
+                  referenceSequence++;
                   clearInterval(timer);
                   unsubscribe();
                   isolate(syncSurfaces);

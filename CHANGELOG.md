@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Subscriptions no longer asks the browser for a 404 every 3 seconds (#207). When the reference plugin or the Subscriptions component is not there, the answer is asked again after 30 seconds and then once a minute, and a reconnect asks again at once; a component that is present is still reconciled every 3 seconds.
+- A failed probe of the reference plugin (network error, timeout, 5xx, unusable answer) no longer reads as "the reference is off". Only a clear answer changes what is known, so Waycraft's section and composer surfaces stop appearing beside a running reference plugin and vanishing again. A running reference is re-checked once a minute, so switching it off is noticed without a reconnect.
+
 ## [0.4.0] - 2026-11-11
 
 Release summary: adds the **MCP manager** Component (Loader row `waycraft-mcp`, default off), V1 of spec #177 (PR #204).
