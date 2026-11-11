@@ -7,10 +7,27 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-11
+
+Release summary: Subscriptions stops polling absent routes every 3 seconds and stops flapping when a probe of the reference plugin fails (#207, PR #208). Client-side only; no host, storage or Component change.
+
 ### Fixed
 
 - Subscriptions no longer asks the browser for a 404 every 3 seconds (#207). When the reference plugin or the Subscriptions component is not there, the answer is asked again after 30 seconds and then once a minute, and a reconnect asks again at once; a component that is present is still reconciled every 3 seconds.
 - A failed probe of the reference plugin (network error, timeout, 5xx, unusable answer) no longer reads as "the reference is off". Only a clear answer changes what is known, so Waycraft's section and composer surfaces stop appearing beside a running reference plugin and vanishing again. A running reference is re-checked once a minute, so switching it off is noticed without a reconnect.
+
+### Evidence and limitations
+
+- `npm run ci` passes at the release commit: format, lint, TypeScript, 1444 tests with none skipped, and a byte-exact fresh build. The behaviour is tested with a fake RPC and fake heartbeats against the real built bundle; independent Standards and Spec reviews were run and their findings applied.
+- **Not live-verified** in the DSH desktop app or a browser: that the console line every 3 seconds is gone, and the behaviour beside a running reference plugin. The Owner checks this after installing.
+- A switch-off of a running reference plugin is noticed within about a minute, and an absent component that is enabled is found within about a minute without a reconnect (before: within 3 seconds). A reconnect re-checks at once.
+- Known minor: a probe slower than 3 seconds can be doubled by the next heartbeat; its stale answer is dropped, so it cannot flap.
+- Not done: the host does not report whether the reference plugin runs. DSH's public context offers no lookup, and the registration collision is invisible when Waycraft registers first (reasoning on #207).
+
+### Upgrade, restart and rollback
+
+- Only the browser bundle changes: after updating, reload the DSH page (a full restart is not required for this release).
+- Rollback: reinstall 0.4.0 through the plugin manager and reload.
 
 ## [0.4.0] - 2026-11-11
 
@@ -216,7 +233,8 @@ First Waycraft npm release; see [final release scope, upgrade and limitations](d
 
 Baseline for the component-by-component plan. Features: Bidirectional text, App UI font size, App font with bundled fonts, System notifications, sidebar actions grouped in the account menu, Copy on select, and the composer Approvals dropdown with the deterministic command classifier. See `README.md`.
 
-[Unreleased]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/majedsiefalnasr/dsh-waycraft/compare/v0.2.2...v0.3.0
