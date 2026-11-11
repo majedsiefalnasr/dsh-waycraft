@@ -1,7 +1,7 @@
 const waycraftMcpFactory = (require) => {
 var module = { exports: {} }; var exports = module.exports;
 
-//#region ../../../../src/mcp-browser.ts
+//#region src/mcp-browser.ts
 function applyMcp(root) {
 	const fail = (error) => console.error("dsh-waycraft: MCP manager setup failed", error);
 	try {
@@ -134,6 +134,17 @@ function setupMcp(ctx, fail) {
 		error: "Unable to load MCP servers.",
 		unauthorized: "Owner authorization required. Paired clients cannot manage MCP servers.",
 		retry: "Retry",
+		registryTitle: "Official MCP Registry",
+		registrySearch: "Search Registry",
+		registryQuery: "Search server names",
+		registryNext: "Next page",
+		registryDetails: "Details",
+		registryReview: "Review configuration",
+		registryNote: "Catalog metadata is not a trust guarantee. Review configuration before adding; nothing is installed or connected automatically.",
+		registryEmpty: "No servers found. Try another search.",
+		registryManual: "No supported HTTP remote. Configure this server manually; package commands are never guessed or installed.",
+		registryHeaders: "Required headers need credential references in the configuration form. Replace all URL placeholders before saving.",
+		registryTransport: "HTTP endpoint",
 		discoverTitle: "Discover MCP configs",
 		discoverNote: "Scans only Owner-approved folders for known MCP config files. Results are candidates only; no servers are executed or activated.",
 		discoverRoots: "Approved search roots (one per line)",
@@ -321,6 +332,17 @@ function setupMcp(ctx, fail) {
 		error: "تعذّر تحميل خوادم MCP.",
 		unauthorized: "مطلوب تفويض المالك. لا يمكن للعملاء المقترنين إدارة خوادم MCP.",
 		retry: "إعادة المحاولة",
+		registryTitle: "سجل MCP الرسمي",
+		registrySearch: "بحث في السجل",
+		registryQuery: "ابحث باسم الخادم",
+		registryNext: "الصفحة التالية",
+		registryDetails: "التفاصيل",
+		registryReview: "مراجعة الإعداد",
+		registryNote: "بيانات السجل ليست ضمانًا للثقة. راجع الإعداد قبل الإضافة؛ لا يتم تثبيت أي شيء أو الاتصال تلقائيًا.",
+		registryEmpty: "لم يتم العثور على خوادم. جرّب بحثًا آخر.",
+		registryManual: "لا توجد نقطة HTTP مدعومة. أعدّ الخادم يدويًا؛ لا نخمن أو نثبت أوامر الحزم.",
+		registryHeaders: "الترويسات المطلوبة تحتاج مراجع بيانات اعتماد في نموذج الإعداد. استبدل جميع متغيرات الرابط قبل الحفظ.",
+		registryTransport: "نقطة HTTP",
 		discoverTitle: "اكتشاف إعدادات MCP",
 		discoverNote: "يفحص فقط المجلدات التي وافق عليها المالك بحثًا عن ملفات إعداد MCP المعروفة. النتائج مرشحة فقط؛ لا يتم تنفيذ أي خادم أو تفعيله.",
 		discoverRoots: "جذور البحث المعتمدة (سطر لكل جذر)",
@@ -488,7 +510,7 @@ function setupMcp(ctx, fail) {
 	}), "dsh-waycraft: mcp dictionaries");
 	const t = ctx.locale.bind(NS);
 	const isArabic = () => ctx.locale.language?.getSnapshot?.() === "ar";
-	async function rpc(action, body = {}) {
+	async function rpc(action, body = {}, signal) {
 		const response = await fetch(MCP_ROUTE, {
 			method: "POST",
 			headers: {
@@ -498,7 +520,8 @@ function setupMcp(ctx, fail) {
 			body: JSON.stringify({
 				action,
 				...body
-			})
+			}),
+			signal
 		});
 		const data = await response.json().catch(() => ({}));
 		if (response.status === 401 || response.status === 403) {
@@ -960,6 +983,8 @@ function setupMcp(ctx, fail) {
 		const kept = isEdit ? keptSecrets(props.original) : {};
 		const dirty = JSON.stringify(f) !== JSON.stringify(props.initial);
 		const errors = validateForm(f, isEdit ? props.original : void 0);
+		if (f.registryReview && /[{}]/.test(f.url)) errors.url = "errUrlInvalid";
+		if (f.registryReview && f.registryRequiredHeaders?.some((name) => !/^\$\{credential:[^}]+\}$/.test(parseKv(f.headers, ":").map[name] || ""))) errors.headers = "errSecretLiteral";
 		const hasErrors = Object.keys(errors).length > 0;
 		const setField = (key, value) => setF((prev) => ({
 			...prev,
@@ -1282,6 +1307,53 @@ function setupMcp(ctx, fail) {
 		const [toolCache, setToolCache] = React.useState({});
 		const [discoverRoots, setDiscoverRoots] = React.useState("");
 		const [discovery, setDiscovery] = React.useState(null);
+		const [registryQuery, setRegistryQuery] = React.useState("");
+		const [registry, setRegistry] = React.useState(null);
+		const [registryError, setRegistryError] = React.useState("");
+		const [registryBusy, setRegistryBusy] = React.useState(false);
+		const [registryDetail, setRegistryDetail] = React.useState("");
+		const registryGeneration = React.useRef(0);
+		const registryPageQuery = React.useRef("");
+		const registryCursors = React.useRef(/* @__PURE__ */ new Set());
+		const registryAbort = React.useRef(null);
+		React.useEffect(() => () => {
+			registryGeneration.current++;
+			registryAbort.current?.abort();
+		}, []);
+		const searchRegistry = async (cursor) => {
+			registryAbort.current?.abort();
+			const controller = new AbortController();
+			registryAbort.current = controller;
+			const generation = ++registryGeneration.current;
+			setRegistryBusy(true);
+			setRegistryError("");
+			setRegistryDetail("");
+			if (!cursor) {
+				registryPageQuery.current = registryQuery;
+				registryCursors.current = /* @__PURE__ */ new Set();
+			}
+			if (cursor) registryCursors.current.add(cursor);
+			try {
+				const data = await rpc("registry_search", {
+					query: registryPageQuery.current,
+					...cursor ? { cursor } : {},
+					limit: 20
+				}, controller.signal);
+				if (generation !== registryGeneration.current) return;
+				const page = data.registry;
+				setRegistry({
+					...page,
+					nextCursor: registryCursors.current.has(page.nextCursor) ? void 0 : page.nextCursor
+				});
+			} catch (error) {
+				if (generation === registryGeneration.current) {
+					setRegistry(null);
+					setRegistryError(error?.message || t("error"));
+				}
+			} finally {
+				if (generation === registryGeneration.current) setRegistryBusy(false);
+			}
+		};
 		const [importText, setImportText] = React.useState("");
 		const [importPreview, setImportPreview] = React.useState(null);
 		const [importApprovals, setImportApprovals] = React.useState({});
@@ -1420,6 +1492,77 @@ function setupMcp(ctx, fail) {
 				}
 			}))
 		}, h("option", { value: "skip" }, t("importConflictSkip")), h("option", { value: "replace" }, t("importConflictReplace"))) : null, h("pre", { className: "waycraft-mcp-pre" }, JSON.stringify(c.config || {}, null, 2)));
+		const registryArea = h("section", {
+			"aria-label": t("registryTitle"),
+			className: "waycraft-mcp-stack"
+		}, h("strong", null, t("registryTitle")), h("p", { className: "waycraft-mcp-note" }, t("registryNote")), h("form", {
+			className: "waycraft-mcp-row",
+			onSubmit: (event) => {
+				event.preventDefault();
+				searchRegistry();
+			}
+		}, h("input", {
+			"aria-label": t("registryQuery"),
+			placeholder: t("registryQuery"),
+			maxLength: 200,
+			value: registryQuery,
+			onInput: (event) => {
+				registryGeneration.current++;
+				registryAbort.current?.abort();
+				setRegistryBusy(false);
+				setRegistry(null);
+				setRegistryQuery(event.target.value);
+			}
+		}), h("button", {
+			type: "submit",
+			disabled: registryBusy,
+			onClick: (event) => {
+				event.preventDefault();
+				searchRegistry();
+			}
+		}, t("registrySearch"))), registryBusy ? h("p", { role: "status" }, t("loading")) : null, registryError ? h("div", { role: "alert" }, registryError, h("button", {
+			type: "button",
+			onClick: () => void searchRegistry()
+		}, t("retry"))) : null, registry && !registryBusy ? h("div", null, !registry.servers?.length ? h("p", { role: "status" }, t("registryEmpty")) : null, ...(registry.servers || []).map((server) => {
+			const identity = `${server.name}@${server.version}`;
+			const remotes = (server.remotes || []).filter((remote) => remote.type === "streamable-http" && /^https?:\/\//i.test(remote.url));
+			return h("article", {
+				key: identity,
+				className: "waycraft-mcp-panel",
+				style: {
+					borderBlockEnd: "1px solid var(--dsw-alias-border-l3)",
+					paddingBlock: "12px"
+				}
+			}, h("div", { className: "waycraft-mcp-row" }, h("strong", null, ltr(server.name)), h("span", { className: "waycraft-mcp-meta" }, ltr(server.version)), h("button", {
+				type: "button",
+				"aria-expanded": registryDetail === identity,
+				onClick: () => setRegistryDetail(registryDetail === identity ? "" : identity)
+			}, t("registryDetails"))), h("p", {
+				className: "waycraft-mcp-note",
+				dir: "auto"
+			}, server.description), registryDetail === identity ? h("div", { className: "waycraft-mcp-stack" }, h("span", { className: "waycraft-mcp-meta" }, t("registryTitle")), !remotes.length ? h("p", null, t("registryManual")) : h("p", { className: "waycraft-mcp-note" }, t("registryHeaders")), ...remotes.map((remote, index) => h("div", {
+				key: index,
+				className: "waycraft-mcp-row"
+			}, ltr(remote.url), h("button", {
+				type: "button",
+				onClick: () => setForm({
+					key: `registry-${identity}-${index}`,
+					original: null,
+					initial: emptyForm({
+						transport: "streamable-http",
+						serverName: server.name.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64),
+						url: remote.url,
+						registryReview: true,
+						registryRequiredHeaders: remote.headers.filter((header) => header.required).map((header) => header.name),
+						headers: remote.headers.filter((header) => header.required).map((header) => `${header.name}: `).join("\n")
+					})
+				})
+			}, t("registryReview"))))) : null);
+		}), registry.nextCursor ? h("button", {
+			type: "button",
+			disabled: registryBusy,
+			onClick: () => void searchRegistry(registry.nextCursor)
+		}, t("registryNext")) : null) : null);
 		const discoveryArea = h("section", {
 			"aria-label": t("discoverTitle"),
 			className: "waycraft-mcp-card"
@@ -1869,7 +2012,7 @@ function setupMcp(ctx, fail) {
 					});
 				});
 			}
-		}) : null, area === "discover" ? h("div", { className: "waycraft-mcp-stack" }, discoveryArea, importArea) : null, area === "trash" ? trashArea : null);
+		}) : null, area === "discover" ? h("div", { className: "waycraft-mcp-stack" }, registryArea, h("details", null, h("summary", null, t("discoverTitle")), discoveryArea), importArea) : null, area === "trash" ? trashArea : null);
 	}
 	effect(() => {
 		let off;

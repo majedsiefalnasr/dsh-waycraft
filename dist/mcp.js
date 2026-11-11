@@ -17,6 +17,7 @@ import { assertTrustApprovedForAction } from './mcp-trust.js';
 import { McpToolCacheStore, resolveMcpToolCachePath, searchMcpTools } from './mcp-tool-cache.js';
 import { previewMcpImport, registerMcpImport } from './mcp-import.js';
 import { discoverMcpConfigs } from './mcp-discovery.js';
+import { searchMcpRegistry, McpRegistryError } from './mcp-registry.js';
 export const name = 'dsh-waycraft/mcp';
 export const inject = ['connection'];
 const MCP_ROUTE = '/api/waycraft-mcp.manage';
@@ -113,6 +114,17 @@ export function apply(ctx, config = {}) {
                 const expectedFingerprint = typeof body.expectedFingerprint === 'string' ? body.expectedFingerprint : undefined;
                 if (action === 'status') {
                     return json({ ok: true, component: 'mcp', authorized: true, version: 1 });
+                }
+                if (action === 'registry_search') {
+                    try {
+                        const registry = await searchMcpRegistry({ query: body.query, cursor: body.cursor, limit: body.limit }, { signal: request.signal });
+                        return json({ ok: true, registry });
+                    }
+                    catch (error) {
+                        if (!(error instanceof McpRegistryError))
+                            throw error;
+                        return reject(error.code === 'registry_input' ? 400 : error.code === 'registry_cancelled' ? 499 : 502, error.message, { code: error.code });
+                    }
                 }
                 if (action === 'list') {
                     // #169: read-only listing. Never probes/enumerates tools.
