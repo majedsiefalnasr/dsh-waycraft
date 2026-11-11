@@ -1,6 +1,15 @@
 # MCP Manager V1 — Integration and Acceptance Verification (#176)
 
-Status: draft evidence report for Gate 2 / Owner review. **No installation, source push, release, npm/GitHub publication, or live DSH config changes are authorized by this report.**
+Status: Gate 2 verified again on 2026-11-11; Gate 3 remains open. Owner separately authorized sequential completion, PR/merge/push and npm/GitHub release. That authorization does not substitute for missing human acceptance, authentication or publication evidence.
+
+## Latest release-gate evidence — 2026-11-11
+
+- Clean locked dependencies installed; canonical `npm run build` now regenerates both Subscriptions and MCP browser factories plus host modules.
+- `npm run ci` passed: formatting, lint, all TypeScript projects, **1424/1424 tests with zero skips**, and a fresh-build byte comparison with no orphan artifacts.
+- Built-artifact Chromium fixtures passed **13/13 with zero skips**, covering MCP UI and Official Registry flows, English/Arabic, narrow/wide layouts and component absence. These fixtures are not authenticated installed-host proof.
+- MCP test setup no longer compiles into shared `dist` or imports ignored private worktrees. Two independent overlapping processes passed 75/75 each without changing nine MCP host artifact hashes or mtimes; focused portability/isolation verification passed 83/83.
+- `npm pack --dry-run --json` listed 128 files, including all MCP host/browser modules and both locales. No scratch, tests, private worktrees, rollback backups, node_modules or Finder metadata were included. This is an allowlist check, not an npm publication.
+- Final Standards review found no new blocking violation. Spec review found one remaining stale-cache race when an explicit connection test completed before an older automatic read; the fix now invalidates that read for both success/failure, with two regressions observed failing before the fix and passing afterward. Full CI and all 13 Chromium fixtures passed again. A targeted recheck caught a retained loading indicator after superseding the old read; probe start now also settles that read's loading/error state, with both outcome regressions asserting no stuck status. Final independent targeted recheck closed the race/settlement finding: all three late-hydration cases passed (refresh, successful test, failed test), with no new blocker. Gate 3, full manual accessibility and actual release remain unverified. Earlier dated counts below are historical.
 
 ## Scope
 

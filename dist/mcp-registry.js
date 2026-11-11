@@ -9,10 +9,14 @@ export class McpRegistryError extends Error {
 }
 /** Anonymous metadata only. Never follows catalog links or runs server configuration. */
 export async function searchMcpRegistry(input, options = {}) {
-    const fail = (code, message) => { throw new McpRegistryError(code, message); };
-    if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 200))
+    const fail = (code, message) => {
+        throw new McpRegistryError(code, message);
+    };
+    if (input.query !== undefined &&
+        (typeof input.query !== 'string' || input.query.length > 200))
         fail('registry_input', 'Search must be at most 200 characters.');
-    if (input.cursor !== undefined && (typeof input.cursor !== 'string' || input.cursor.length > 2048))
+    if (input.cursor !== undefined &&
+        (typeof input.cursor !== 'string' || input.cursor.length > 2048))
         fail('registry_input', 'Invalid Registry page cursor.');
     const limit = input.limit ?? 20;
     if (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 25)
@@ -34,7 +38,11 @@ export async function searchMcpRegistry(input, options = {}) {
     try {
         if (controller.signal.aborted)
             fail('registry_cancelled', 'Registry request cancelled.');
-        const response = await (options.fetch ?? fetch)(url, { signal: controller.signal, redirect: 'error', headers: { accept: 'application/json' } });
+        const response = await (options.fetch ?? fetch)(url, {
+            signal: controller.signal,
+            redirect: 'error',
+            headers: { accept: 'application/json' },
+        });
         if (!response.ok)
             fail('registry_upstream', `Registry is unavailable (HTTP ${response.status}). Retry later.`);
         if (Number(response.headers.get('content-length')) > MAX_BYTES)
@@ -75,31 +83,47 @@ export async function searchMcpRegistry(input, options = {}) {
             const version = readBoundedString(server?.version, 200);
             if (!name || !version)
                 fail('registry_response', 'Registry metadata is missing identity.');
-            if (server.remotes !== undefined && (!Array.isArray(server.remotes) || server.remotes.length > 20))
+            if (server.remotes !== undefined &&
+                (!Array.isArray(server.remotes) || server.remotes.length > 20))
                 fail('registry_response', 'Invalid Registry transports.');
             return {
-                name, version, description: readBoundedString(server.description ?? '', 5000), hasPackages: Array.isArray(server.packages) && server.packages.length > 0,
+                name,
+                version,
+                description: readBoundedString(server.description ?? '', 5000),
+                hasPackages: Array.isArray(server.packages) && server.packages.length > 0,
                 remotes: (server.remotes ?? []).map((remote) => {
                     if (!remote || typeof remote !== 'object')
                         fail('registry_response', 'Invalid Registry transport.');
-                    if (remote.headers !== undefined && (!Array.isArray(remote.headers) || remote.headers.length > 50))
+                    if (remote.headers !== undefined &&
+                        (!Array.isArray(remote.headers) || remote.headers.length > 50))
                         fail('registry_response', 'Invalid Registry headers.');
-                    return { type: readBoundedString(remote.type, 100), url: readBoundedString(remote.url, 4096), headers: (remote.headers ?? []).map((header) => {
+                    return {
+                        type: readBoundedString(remote.type, 100),
+                        url: readBoundedString(remote.url, 4096),
+                        headers: (remote.headers ?? []).map((header) => {
                             if (!header || typeof header !== 'object')
                                 fail('registry_response', 'Invalid Registry header.');
-                            return { name: readBoundedString(header.name, 200), required: header.isRequired === true };
-                        }) };
+                            return {
+                                name: readBoundedString(header.name, 200),
+                                required: header.isRequired === true,
+                            };
+                        }),
+                    };
                 }),
             };
         });
-        const nextCursor = data.metadata?.nextCursor === undefined ? undefined : readBoundedString(data.metadata.nextCursor, 2048);
+        const nextCursor = data.metadata?.nextCursor === undefined
+            ? undefined
+            : readBoundedString(data.metadata.nextCursor, 2048);
         return { servers, ...(nextCursor ? { nextCursor } : {}) };
     }
     catch (error) {
         if (error instanceof McpRegistryError)
             throw error;
         if (controller.signal.aborted)
-            fail(options.signal?.aborted ? 'registry_cancelled' : 'registry_timeout', options.signal?.aborted ? 'Registry request cancelled.' : 'Registry timed out. Retry later.');
+            fail(options.signal?.aborted ? 'registry_cancelled' : 'registry_timeout', options.signal?.aborted
+                ? 'Registry request cancelled.'
+                : 'Registry timed out. Retry later.');
         return fail('registry_network', 'Unable to reach the Official Registry. Retry later.');
     }
     finally {

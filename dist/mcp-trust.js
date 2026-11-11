@@ -56,7 +56,11 @@ export function reviewedConfigFingerprint(config) {
 export function detectMaterialChange(before, after) {
     const beforeFingerprint = reviewedConfigFingerprint(before);
     const afterFingerprint = reviewedConfigFingerprint(after);
-    return { changed: beforeFingerprint !== afterFingerprint, beforeFingerprint, afterFingerprint };
+    return {
+        changed: beforeFingerprint !== afterFingerprint,
+        beforeFingerprint,
+        afterFingerprint,
+    };
 }
 export function emptyTrust(reason = 'not_approved') {
     return { state: 'untrusted', fingerprint: null, reason };
@@ -75,7 +79,12 @@ export function trustFromRowMeta(meta, config) {
         };
     }
     if (t.state === 'trusted' && approvedFp && approvedFp !== currentFp) {
-        return { state: 'invalidated', fingerprint: approvedFp, invalidatedAt: new Date().toISOString(), reason: 'material_change' };
+        return {
+            state: 'invalidated',
+            fingerprint: approvedFp,
+            invalidatedAt: new Date().toISOString(),
+            reason: 'material_change',
+        };
     }
     if (t.state === 'invalidated') {
         return {
@@ -88,7 +97,9 @@ export function trustFromRowMeta(meta, config) {
     return emptyTrust(typeof t.reason === 'string' ? t.reason : 'not_approved');
 }
 export function applyTrustApprovalMeta(rowMeta, config, now = new Date()) {
-    const meta = isRecord(rowMeta) ? { ...rowMeta } : { owner: 'waycraft', version: 1 };
+    const meta = isRecord(rowMeta)
+        ? { ...rowMeta }
+        : { owner: 'waycraft', version: 1 };
     meta.trust = {
         state: 'trusted',
         fingerprint: reviewedConfigFingerprint(config),
@@ -97,8 +108,12 @@ export function applyTrustApprovalMeta(rowMeta, config, now = new Date()) {
     return meta;
 }
 export function invalidateTrustMeta(rowMeta, reason = 'material_change', now = new Date()) {
-    const meta = isRecord(rowMeta) ? { ...rowMeta } : { owner: 'waycraft', version: 1 };
-    const prev = isRecord(meta.trust) ? meta.trust : {};
+    const meta = isRecord(rowMeta)
+        ? { ...rowMeta }
+        : { owner: 'waycraft', version: 1 };
+    const prev = isRecord(meta.trust)
+        ? meta.trust
+        : {};
     meta.trust = {
         state: 'invalidated',
         fingerprint: typeof prev.fingerprint === 'string' ? prev.fingerprint : null,
@@ -108,7 +123,9 @@ export function invalidateTrustMeta(rowMeta, reason = 'material_change', now = n
     return meta;
 }
 export function clearTrustForSave(rowMeta) {
-    const meta = isRecord(rowMeta) ? { ...rowMeta } : { owner: 'waycraft', version: 1 };
+    const meta = isRecord(rowMeta)
+        ? { ...rowMeta }
+        : { owner: 'waycraft', version: 1 };
     // Saving reviewed config through create path starts untrusted.
     if (!meta.trust)
         meta.trust = emptyTrust('save_does_not_imply_trust');

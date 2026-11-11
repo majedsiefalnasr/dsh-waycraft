@@ -3,7 +3,13 @@
 // Playwright is NOT a dependency: it is resolved dynamically and the suite skips when absent.
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -55,25 +61,28 @@ export async function launch() {
 }
 
 export function bundleReact() {
-  const entry = join(ROOT, '.browser-entry.tmp.js');
-  const out = join(tmpdir(), `waycraft-browser-react-${process.pid}.js`);
-  execFileSync('node', [
-    '-e',
-    `require('fs').writeFileSync(${JSON.stringify(entry)}, "import * as React from 'react';import * as ReactDOM from 'react-dom';import * as Client from 'react-dom/client';window.__R={React,ReactDOM,Client};")`,
-  ]);
+  const work = mkdtempSync(join(tmpdir(), 'waycraft-browser-react-'));
+  const entry = join(work, 'entry.js');
+  const out = join(work, 'bundle.js');
+  // Verify the exact private cleanup target before acquiring any child files.
+  if (dirname(entry) !== work || dirname(out) !== work)
+    throw new Error('Invalid browser bundle fixture paths');
   try {
+    const require = createRequire(join(ROOT, 'package.json'));
+    writeFileSync(
+      entry,
+      `import * as React from ${JSON.stringify(require.resolve('react'))};import * as ReactDOM from ${JSON.stringify(require.resolve('react-dom'))};import * as Client from ${JSON.stringify(require.resolve('react-dom/client'))};window.__R={React,ReactDOM,Client};`,
+    );
     execFileSync(
       join(ROOT, 'node_modules/.bin/rolldown'),
       [entry, '--format', 'iife', '--file', out],
       { cwd: ROOT, stdio: 'ignore' },
     );
+    return readFileSync(out, 'utf8');
   } finally {
-    execFileSync('node', [
-      '-e',
-      `require('fs').rmSync(${JSON.stringify(entry)},{force:true})`,
-    ]);
+    // The allocator returned this verified private directory, never a shared entry.
+    rmSync(work, { recursive: true, force: true });
   }
-  return readFileSync(out, 'utf8');
 }
 
 export const THEME = `:root{--dsw-alias-label-primary:#111;--dsw-alias-label-secondary:#555;--dsw-alias-border-l2:#ddd;--dsw-alias-border-l3:#ccc;--dsw-alias-bg-layer-1:#fff;--dsw-alias-bg-layer-2:#f6f6f6;--dsw-alias-brand-primary:#6b26d9;--dsw-alias-switch-thumb:#fff;--dsw-alias-label-primary-foreground:#fff}body{font:14px system-ui;color:#111}`;

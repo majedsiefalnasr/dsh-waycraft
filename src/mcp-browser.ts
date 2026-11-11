@@ -7,10 +7,16 @@ export function applyMcp(root: any): void {
   try {
     Promise.resolve(
       root.inject(['slots', 'locale', 'connection'], (ctx: any) => {
-        try { setupMcp(ctx, fail); } catch (error) { fail(error); }
+        try {
+          setupMcp(ctx, fail);
+        } catch (error) {
+          fail(error);
+        }
       }),
     ).catch(fail);
-  } catch (error) { fail(error); }
+  } catch (error) {
+    fail(error);
+  }
 }
 
 const MCP_ROUTE = '/api/waycraft-mcp.manage';
@@ -20,44 +26,80 @@ const NS = 'waycraft.mcp';
 // cannot import host modules, so these only give immediate feedback; the host stays authoritative.
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const CREDENTIAL_REF = /\$\{credential:[^}]+\}/;
-const SENSITIVE_KEY = /(token|secret|password|passwd|api.?key|apikey|auth|authorization|cookie|credential|bearer|private.?key|access.?key|client.?secret|session)/i;
-const SECRET_VALUE = /(sk-[A-Za-z0-9]{12,}|gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|AIza[0-9A-Za-z\-_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|Bearer\s+[A-Za-z0-9\-._~+/]+=*|Basic\s+[A-Za-z0-9+/]+=+)/;
+const SENSITIVE_KEY =
+  /(token|secret|password|passwd|api.?key|apikey|auth|authorization|cookie|credential|bearer|private.?key|access.?key|client.?secret|session)/i;
+const SECRET_VALUE =
+  /(sk-[A-Za-z0-9]{12,}|gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|AIza[0-9A-Za-z\-_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|Bearer\s+[A-Za-z0-9\-._~+/]+=*|Basic\s+[A-Za-z0-9+/]+=+)/;
 const REDACTED = '[REDACTED]';
 /** True when a value would be stored as plaintext: not a ${credential:REF} and sensitive by key or secret-shaped. */
 function isPlainSecret(key: string, value: string): boolean {
-  return !CREDENTIAL_REF.test(value) && (SENSITIVE_KEY.test(key) || SECRET_VALUE.test(value));
+  return (
+    !CREDENTIAL_REF.test(value) &&
+    (SENSITIVE_KEY.test(key) || SECRET_VALUE.test(value))
+  );
 }
 // Regex, not URL: the browser sandbox does not always expose the URL global. The host stays authoritative.
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\/[^\s/?#]+(?:[/?#]\S*)?$/i.test(value);
 }
 // Exact-name matches only: a query parameter or option flag whose literal value is a secret.
-const SENSITIVE_QUERY = /^(token|key|secret|password|passwd|pwd|auth|api_key|apikey|access_token|client_secret|sig|signature)$/i;
-const SENSITIVE_FLAG = /^--?(?:[a-z0-9]+[-_])*(token|secret|password|passwd|pwd|auth|api[-_]?key|access[-_]?key|client[-_]?secret)$/i;
+const SENSITIVE_QUERY =
+  /^(token|key|secret|password|passwd|pwd|auth|api_key|apikey|access_token|client_secret|sig|signature)$/i;
+const SENSITIVE_FLAG =
+  /^--?(?:[a-z0-9]+[-_])*(token|secret|password|passwd|pwd|auth|api[-_]?key|access[-_]?key|client[-_]?secret)$/i;
 // Technical tokens that stay LTR inside English and Arabic help text and messages.
-const TECH_TOKEN = /(\$\{credential:[^}]*\}|\[REDACTED\]|KEY=VALUE|Name: value|مفتاح=قيمة|اسم: قيمة)/;
+const TECH_TOKEN =
+  /(\$\{credential:[^}]*\}|\[REDACTED\]|KEY=VALUE|Name: value|مفتاح=قيمة|اسم: قيمة)/;
 // Field errors shown as soon as the value is entered, not only after blur or Save.
-const IMMEDIATE_ERRORS = ['errSecretLiteral', 'errSecretUrl', 'errSecretArg', 'errRedactedLiteral'];
+const IMMEDIATE_ERRORS = [
+  'errSecretLiteral',
+  'errSecretUrl',
+  'errSecretArg',
+  'errRedactedLiteral',
+];
 function safeDecode(value: string): string {
-  try { return decodeURIComponent(value); } catch { return value; }
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 /** Copy of a URL for display: userinfo and sensitive query values are masked; ${credential:REF} is kept. */
 function maskUrl(url: string): string {
   return url
-    .replace(/^(https?:\/\/)([^\/?#]*)@/i, (m, scheme, userinfo) => (CREDENTIAL_REF.test(safeDecode(userinfo)) ? m : `${scheme}${REDACTED}@`))
-    .replace(/([?&])([^=&#]+)=([^&#]*)/g, (m, sep, name, value) => (SENSITIVE_QUERY.test(name) && value && !CREDENTIAL_REF.test(safeDecode(value)) ? `${sep}${name}=${REDACTED}` : m));
+    .replace(/^(https?:\/\/)([^\/?#]*)@/i, (m, scheme, userinfo) =>
+      CREDENTIAL_REF.test(safeDecode(userinfo)) ? m : `${scheme}${REDACTED}@`,
+    )
+    .replace(/([?&])([^=&#]+)=([^&#]*)/g, (m, sep, name, value) =>
+      SENSITIVE_QUERY.test(name) &&
+      value &&
+      !CREDENTIAL_REF.test(safeDecode(value))
+        ? `${sep}${name}=${REDACTED}`
+        : m,
+    );
 }
 /** True when a URL would store a secret: userinfo, a sensitive query value, or a secret-shaped literal. */
 function urlHasSecret(url: string): boolean {
-  return maskUrl(url) !== url || (SECRET_VALUE.test(url) && !CREDENTIAL_REF.test(url));
+  return (
+    maskUrl(url) !== url ||
+    (SECRET_VALUE.test(url) && !CREDENTIAL_REF.test(url))
+  );
 }
 /** Copy of args for display: secret-shaped literals and literal values after a sensitive flag are masked. */
 function maskArgs(args: string[]): string[] {
-  const literal = (v: string) => v !== '' && !v.startsWith('-') && !CREDENTIAL_REF.test(v);
+  const literal = (v: string) =>
+    v !== '' && !v.startsWith('-') && !CREDENTIAL_REF.test(v);
   return args.map((arg, i) => {
     const eq = arg.indexOf('=');
-    if (arg.startsWith('-') && eq > 0 && SENSITIVE_FLAG.test(arg.slice(0, eq)) && literal(arg.slice(eq + 1))) return `${arg.slice(0, eq)}=${REDACTED}`;
-    if (i > 0 && SENSITIVE_FLAG.test(args[i - 1]) && literal(arg)) return REDACTED;
+    if (
+      arg.startsWith('-') &&
+      eq > 0 &&
+      SENSITIVE_FLAG.test(arg.slice(0, eq)) &&
+      literal(arg.slice(eq + 1))
+    )
+      return `${arg.slice(0, eq)}=${REDACTED}`;
+    if (i > 0 && SENSITIVE_FLAG.test(args[i - 1]) && literal(arg))
+      return REDACTED;
     if (!CREDENTIAL_REF.test(arg) && SECRET_VALUE.test(arg)) return REDACTED;
     return arg;
   });
@@ -68,7 +110,7 @@ function argsHaveSecret(args: string[]): boolean {
 /** Saved values the host masked as [REDACTED], counted per config key. Host list output masks them. */
 function keptSecrets(original: any): Record<string, number> {
   const c = original?.config || {};
-  const count = (values: any[]) => values.filter(v => v === REDACTED).length;
+  const count = (values: any[]) => values.filter((v) => v === REDACTED).length;
   return {
     env: count(Object.values(c.env || {})),
     headers: count(Object.values(c.headers || {})),
@@ -79,26 +121,55 @@ function keptSecrets(original: any): Record<string, number> {
 }
 /** Copy of a config for display only: plaintext secrets in env, headers, args and the URL are masked. */
 function redactForPreview(config: any): any {
-  const mask = (map: Record<string, string> | undefined) => map ? Object.fromEntries(Object.entries(map).map(([k, v]) => [k, isPlainSecret(k, v) ? REDACTED : v])) : map;
+  const mask = (map: Record<string, string> | undefined) =>
+    map
+      ? Object.fromEntries(
+          Object.entries(map).map(([k, v]) => [
+            k,
+            isPlainSecret(k, v) ? REDACTED : v,
+          ]),
+        )
+      : map;
   return {
     ...config,
     url: config.url === undefined ? undefined : maskUrl(config.url),
     args: config.args === undefined ? undefined : maskArgs(config.args),
-    env: mask(config.env), headers: mask(config.headers),
+    env: mask(config.env),
+    headers: mask(config.headers),
   };
 }
 
 function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   const effect = (run: () => any, label: string) => {
-    try { const r = ctx.effect(run, label); Promise.resolve(r).catch(fail); return r; }
-    catch (error) { fail(error); }
+    try {
+      const r = ctx.effect(run, label);
+      Promise.resolve(r).catch(fail);
+      return r;
+    } catch (error) {
+      fail(error);
+    }
   };
   const React = require('react');
   const h = React.createElement;
+  let primitives: any = {};
+  try {
+    primitives = require('@deepseek-ai/dsh-client-ui-primitives') || {};
+  } catch {
+    /* Older hosts can still render the existing accessible controls. */
+  }
+  function tooltip(label: string, anchor: any): any {
+    if (!primitives.Tooltip) return anchor;
+    return h(
+      primitives.Tooltip,
+      { label, side: 'bottom', portal: true },
+      React.cloneElement(anchor, { title: undefined }),
+    );
+  }
 
   const en = {
     title: 'MCP servers',
-    description: 'Manage MCP servers for this DSH profile. Management actions require Owner authorization.',
+    description:
+      'Manage MCP servers for this DSH profile. Management actions require Owner authorization.',
     areaServers: 'Servers',
     areaDiscoverImport: 'Discover & Import',
     areaTrash: 'Trash',
@@ -120,7 +191,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     emptyTrash: 'Trash is empty.',
     loading: 'Loading MCP servers…',
     error: 'Unable to load MCP servers.',
-    unauthorized: 'Owner authorization required. Paired clients cannot manage MCP servers.',
+    unauthorized:
+      'Owner authorization required. Paired clients cannot manage MCP servers.',
     retry: 'Retry',
     registryTitle: 'Official MCP Registry',
     registrySearch: 'Search Registry',
@@ -128,13 +200,17 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     registryNext: 'Next page',
     registryDetails: 'Details',
     registryReview: 'Review configuration',
-    registryNote: 'Catalog metadata is not a trust guarantee. Review configuration before adding; nothing is installed or connected automatically.',
+    registryNote:
+      'Catalog metadata is not a trust guarantee. Review configuration before adding; nothing is installed or connected automatically.',
     registryEmpty: 'No servers found. Try another search.',
-    registryManual: 'No supported HTTP remote. Configure this server manually; package commands are never guessed or installed.',
-    registryHeaders: 'Required headers need credential references in the configuration form. Replace all URL placeholders before saving.',
+    registryManual:
+      'No supported HTTP remote. Configure this server manually; package commands are never guessed or installed.',
+    registryHeaders:
+      'Required headers need credential references in the configuration form. Replace all URL placeholders before saving.',
     registryTransport: 'HTTP endpoint',
     discoverTitle: 'Discover MCP configs',
-    discoverNote: 'Scans only Owner-approved folders for known MCP config files. Results are candidates only; no servers are executed or activated.',
+    discoverNote:
+      'Scans only Owner-approved folders for known MCP config files. Results are candidates only; no servers are executed or activated.',
     discoverRoots: 'Approved search roots (one per line)',
     discoverScan: 'Scan approved roots',
     discoverEmpty: 'No discovery results yet.',
@@ -143,10 +219,20 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     discoverOversized: 'Oversized',
     discoverUnreadable: 'Unreadable',
     discoverSkipped: 'Skipped',
-    discoverCandidatesNote: 'Candidates are presented for explicit review and registration. Discovery does not auto-activate servers.',
+    discoverCandidatesNote:
+      'Candidates are presented for explicit review and registration. Discovery does not auto-activate servers.',
     importTitle: 'Import MCP configuration',
-    importNote: 'Paste supported JSON. Preview is required before explicit registration approval. Import never executes servers and does not imply trust.',
-    importJson: 'Import JSON',
+    importNote:
+      'Paste supported JSON. Preview is required before explicit registration approval. Import never executes servers and does not imply trust.',
+    importJson: 'Paste JSON (optional)',
+    importFile: 'Choose JSON file',
+    importDrop: 'Drop an MCP configuration JSON file here',
+    importFormats:
+      'Supported: .json files containing an mcpServers map or a Waycraft MCP v1 envelope. One file at a time; maximum 24 KiB. YAML, ZIP and server.json registry manifests are not supported.',
+    importFileError:
+      'Choose one valid JSON configuration file, no larger than 24 KiB.',
+    importDiscard: 'Discard this import preview and selected configuration?',
+    toolsReadError: 'Unable to read saved tools. Try again.',
     importPreview: 'Preview import',
     importApproveRegister: 'Register approved candidates',
     importNoPreview: 'Preview the import before registration.',
@@ -158,7 +244,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     importConflict: 'Conflict',
     importCredRefs: 'Credential refs',
     importRegistered: 'Registration result',
-    trashNote: 'Trash is operationally meaningful: trashed servers are inactive and removed from the active list. Restore revalidates trust; permanent delete requires explicit confirmation.',
+    trashNote:
+      'Trash is operationally meaningful: trashed servers are inactive and removed from the active list. Restore revalidates trust; permanent delete requires explicit confirmation.',
     trashMoveAction: 'Move selected to Trash',
     trashRestoreAction: 'Restore selected',
     trashPermanentAction: 'Permanently delete selected',
@@ -175,19 +262,23 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     actions: 'Actions',
     testConnection: 'Test connection',
     approveTrust: 'Approve reviewed config',
-    trustInvalidated: 'Config changed; review and approve again before operational actions.',
+    trustInvalidated:
+      'Config changed; review and approve again before operational actions.',
     trustUntrusted: 'Untrusted. Saving does not imply trust.',
     trustTrusted: 'Trusted for reviewed config fingerprint.',
     moveToTrash: 'Move to Trash',
     restore: 'Restore',
     permanentDelete: 'Permanently delete',
-    confirmTrash: 'Move this server to Trash? It becomes operationally inactive and can be restored.',
-    confirmPermanent: 'Permanently delete this server configuration? This cannot be undone. Shared credential references are not deleted.',
+    confirmTrash:
+      'Move this server to Trash? It becomes operationally inactive and can be restored.',
+    confirmPermanent:
+      'Permanently delete this server configuration? This cannot be undone. Shared credential references are not deleted.',
     cancel: 'Cancel',
     confirm: 'Confirm',
     configDesiredDisabled: 'Config disabled (desired state)',
     configDesiredEnabled: 'Config enabled (desired state)',
-    runtimeNote: 'V1 shows server configuration, trust, and observed test results. It does not claim runtime tool enforcement guarantees beyond verified host behavior.',
+    runtimeNote:
+      'V1 shows server configuration, trust, and observed test results. It does not claim runtime tool enforcement guarantees beyond verified host behavior.',
     readOnlyTools: 'Read-only. No per-tool enable/disable controls in V1.',
     listTools: 'List cached tools',
     refreshTools: 'Refresh tools (explicit)',
@@ -219,21 +310,29 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     serverList: 'MCP server list',
     trashList: 'Trashed MCP servers',
     refreshAria: 'Refresh servers',
+    more: 'More actions',
     editServer: 'Edit',
     addTitle: 'Add MCP server',
     editTitle: 'Edit MCP server',
-    formNote: 'Saving stores the configuration only. It does not trust, connect or start the server. Review and approve the saved config, then test the connection separately.',
+    formNote:
+      'Saving stores the configuration only. It does not trust, connect or start the server. Review and approve the saved config, then test the connection separately.',
     transportLabel: 'Transport',
     transportStdio: 'Local command (stdio)',
     transportHttp: 'Remote URL (streamable HTTP)',
-    nameHelp: 'Letters, digits, dot, underscore or hyphen; starts with a letter or digit. Cannot be changed after creation.',
+    nameHelp:
+      'Letters, digits, dot, underscore or hyphen; starts with a letter or digit. Cannot be changed after creation.',
     nameLocked: 'Server name is fixed after creation.',
-    argsHelp: 'One argument per line. Arguments containing spaces are kept as typed.',
-    errCleared: 'Removing a saved value is not supported yet. Enter a new value or keep the saved one.',
+    argsHelp:
+      'One argument per line. Arguments containing spaces are kept as typed.',
+    errCleared:
+      'Removing a saved value is not supported yet. Enter a new value or keep the saved one.',
     noChanges: 'No changes to save.',
-    saveDone: 'Configuration saved. Review and approve it, then test the connection separately.',
-    envHelp: 'One KEY=VALUE per line. Store secrets as ${credential:REF} references, not plain values.',
-    headersHelp: 'One Name: value per line. Store secrets as ${credential:REF} references, not plain values.',
+    saveDone:
+      'Configuration saved. Review and approve it, then test the connection separately.',
+    envHelp:
+      'One KEY=VALUE per line. Store secrets as ${credential:REF} references, not plain values.',
+    headersHelp:
+      'One Name: value per line. Store secrets as ${credential:REF} references, not plain values.',
     advanced: 'Advanced',
     startupTimeoutMs: 'Startup timeout (ms)',
     toolCallTimeoutMs: 'Tool call timeout (ms)',
@@ -241,18 +340,25 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     saveServer: 'Save configuration',
     saving: 'Saving…',
     errRequired: 'Required.',
-    errNameInvalid: 'Use letters, digits, dot, underscore or hyphen; start with a letter or digit (max 128).',
+    errNameInvalid:
+      'Use letters, digits, dot, underscore or hyphen; start with a letter or digit (max 128).',
     errUrlInvalid: 'Enter a valid http:// or https:// URL.',
     errLineInvalid: 'Use KEY=VALUE on each line.',
     errHeaderInvalid: 'Use Name: value on each line.',
     errTimeoutInvalid: 'Enter a whole number of milliseconds (0 or more).',
-    errSecretLiteral: 'This looks like a plaintext secret. Replace it with a ${credential:REF} reference before saving.',
-    errSecretUrl: 'The URL contains a password, token or other secret. Use a ${credential:REF} reference instead.',
-    errSecretArg: 'An argument looks like a plaintext secret. Replace it with a ${credential:REF} reference before saving.',
-    errRedactedLiteral: 'The placeholder [REDACTED] is not a value. Enter a ${credential:REF} reference instead.',
+    errSecretLiteral:
+      'This looks like a plaintext secret. Replace it with a ${credential:REF} reference before saving.',
+    errSecretUrl:
+      'The URL contains a password, token or other secret. Use a ${credential:REF} reference instead.',
+    errSecretArg:
+      'An argument looks like a plaintext secret. Replace it with a ${credential:REF} reference before saving.',
+    errRedactedLiteral:
+      'The placeholder [REDACTED] is not a value. Enter a ${credential:REF} reference instead.',
     keptNote: 'saved secret value(s) kept as stored.',
-    conflictReloaded: 'Configuration changed on disk - reloaded; review and save again.',
-    importPartialWarning: 'Registration finished with issues: some candidates were skipped, rejected or failed. Review the result below.',
+    conflictReloaded:
+      'Configuration changed on disk - reloaded; review and save again.',
+    importPartialWarning:
+      'Registration finished with issues: some candidates were skipped, rejected or failed. Review the result below.',
     errExists: 'A server with this name already exists. Choose another name.',
     envLabel: 'Environment (KEY=VALUE)',
     headersLabel: 'Headers (Name: value)',
@@ -270,13 +376,21 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     statusSaved: 'Saved to configuration',
     statusNotSaved: 'Not saved',
     statusRestart: 'Restart may be required — runtime application not verified',
-    statusRestartNote: 'Waycraft saves the config; it cannot confirm the running DSH runtime has picked it up.',
-    testNever: 'Not tested in this session',
+    statusRestartNote:
+      'Waycraft saves the config; it cannot confirm the running DSH runtime has picked it up.',
+    connectionOff: 'Configured off; runtime state not verified',
+    connectionReview: 'Trust review required; connection not verified',
+    connectionPassed: 'Last connection check succeeded; not a live monitor',
+    connectionFailed: 'Last connection check failed; not a live monitor',
+    connectionUnknown: 'Connection unknown; no saved connection check',
+    checkedAt: 'Last checked: {time}',
+    testNever: 'No saved connection check',
     testBadgeNever: 'Not tested',
     testPassed: 'Test passed',
     testFailed: 'Test failed',
     testOutcome: 'Test result',
-    testPendingNote: 'Run Test connection to check the server. A test does not approve trust.',
+    testPendingNote:
+      'Run Test connection to check the server. A test does not approve trust.',
     configOff: 'Configured off',
     configEnabled: 'Enabled in config',
     trustBadgeTrusted: 'Trusted',
@@ -285,18 +399,22 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     statTrusted: 'trusted',
     statNeedsReview: 'need review',
     statOff: 'configured off',
-    configOffHelp: 'This switch only records the config flag. DSH runtime enforcement is not verified, so the server may still run.',
+    configOffHelp:
+      'This switch only records the config flag. DSH runtime enforcement is not verified, so the server may still run.',
     importResultRegistered: 'Registered {n} server(s).',
     importResultReplaced: 'Replaced {n} existing server(s).',
-    importResultSkipped: 'Skipped {n} because a server with that name already exists. Choose Replace to overwrite it.',
+    importResultSkipped:
+      'Skipped {n} because a server with that name already exists. Choose Replace to overwrite it.',
     importResultRejected: 'Rejected {n} candidate(s) that failed validation.',
     importResultFailed: 'Failed {n} candidate(s) with an error.',
     importResultNone: 'Nothing was registered.',
-    importResultNote: 'Registration does not trust or start any server. Review and test them separately.',
+    importResultNote:
+      'Registration does not trust or start any server. Review and test them separately.',
   };
   const ar = {
     title: 'خوادم MCP',
-    description: 'إدارة خوادم MCP لملف DSH هذا. إجراءات الإدارة تتطلب تفويض المالك.',
+    description:
+      'إدارة خوادم MCP لملف DSH هذا. إجراءات الإدارة تتطلب تفويض المالك.',
     areaServers: 'الخوادم',
     areaDiscoverImport: 'الاكتشاف والاستيراد',
     areaTrash: 'سلة المهملات',
@@ -318,7 +436,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     emptyTrash: 'سلة المهملات فارغة.',
     loading: 'جارٍ تحميل خوادم MCP…',
     error: 'تعذّر تحميل خوادم MCP.',
-    unauthorized: 'مطلوب تفويض المالك. لا يمكن للعملاء المقترنين إدارة خوادم MCP.',
+    unauthorized:
+      'مطلوب تفويض المالك. لا يمكن للعملاء المقترنين إدارة خوادم MCP.',
     retry: 'إعادة المحاولة',
     registryTitle: 'سجل MCP الرسمي',
     registrySearch: 'بحث في السجل',
@@ -326,13 +445,17 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     registryNext: 'الصفحة التالية',
     registryDetails: 'التفاصيل',
     registryReview: 'مراجعة الإعداد',
-    registryNote: 'بيانات السجل ليست ضمانًا للثقة. راجع الإعداد قبل الإضافة؛ لا يتم تثبيت أي شيء أو الاتصال تلقائيًا.',
+    registryNote:
+      'بيانات السجل ليست ضمانًا للثقة. راجع الإعداد قبل الإضافة؛ لا يتم تثبيت أي شيء أو الاتصال تلقائيًا.',
     registryEmpty: 'لم يتم العثور على خوادم. جرّب بحثًا آخر.',
-    registryManual: 'لا توجد نقطة HTTP مدعومة. أعدّ الخادم يدويًا؛ لا نخمن أو نثبت أوامر الحزم.',
-    registryHeaders: 'الترويسات المطلوبة تحتاج مراجع بيانات اعتماد في نموذج الإعداد. استبدل جميع متغيرات الرابط قبل الحفظ.',
+    registryManual:
+      'لا توجد نقطة HTTP مدعومة. أعدّ الخادم يدويًا؛ لا نخمن أو نثبت أوامر الحزم.',
+    registryHeaders:
+      'الترويسات المطلوبة تحتاج مراجع بيانات اعتماد في نموذج الإعداد. استبدل جميع متغيرات الرابط قبل الحفظ.',
     registryTransport: 'نقطة HTTP',
     discoverTitle: 'اكتشاف إعدادات MCP',
-    discoverNote: 'يفحص فقط المجلدات التي وافق عليها المالك بحثًا عن ملفات إعداد MCP المعروفة. النتائج مرشحة فقط؛ لا يتم تنفيذ أي خادم أو تفعيله.',
+    discoverNote:
+      'يفحص فقط المجلدات التي وافق عليها المالك بحثًا عن ملفات إعداد MCP المعروفة. النتائج مرشحة فقط؛ لا يتم تنفيذ أي خادم أو تفعيله.',
     discoverRoots: 'جذور البحث المعتمدة (سطر لكل جذر)',
     discoverScan: 'فحص الجذور المعتمدة',
     discoverEmpty: 'لا توجد نتائج اكتشاف بعد.',
@@ -341,10 +464,19 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     discoverOversized: 'كبير جدًا',
     discoverUnreadable: 'غير قابل للقراءة',
     discoverSkipped: 'تم التخطي',
-    discoverCandidatesNote: 'تُعرض المرشحات للمراجعة والتسجيل الصريح. الاكتشاف لا يفعّل الخوادم تلقائيًا.',
+    discoverCandidatesNote:
+      'تُعرض المرشحات للمراجعة والتسجيل الصريح. الاكتشاف لا يفعّل الخوادم تلقائيًا.',
     importTitle: 'استيراد إعداد MCP',
-    importNote: 'ألصق JSON مدعومًا. المعاينة مطلوبة قبل موافقة التسجيل الصريحة. الاستيراد لا ينفّذ الخوادم ولا يعني الثقة.',
-    importJson: 'JSON للاستيراد',
+    importNote:
+      'ألصق JSON مدعومًا. المعاينة مطلوبة قبل موافقة التسجيل الصريحة. الاستيراد لا ينفّذ الخوادم ولا يعني الثقة.',
+    importJson: 'لصق JSON (اختياري)',
+    importFile: 'اختيار ملف JSON',
+    importDrop: 'أفلت ملف إعداد MCP بصيغة JSON هنا',
+    importFormats:
+      'المدعوم: ملفات .json تحتوي على خريطة mcpServers أو إعداد Waycraft MCP v1. ملف واحد بحد أقصى 24 KiB. لا ندعم YAML أو ZIP أو ملفات server.json الخاصة بالسجلات.',
+    importFileError: 'اختر ملف إعداد JSON واحدًا صالحًا بحجم لا يتجاوز 24 KiB.',
+    importDiscard: 'تجاهل معاينة الاستيراد والإعداد المحدد؟',
+    toolsReadError: 'تعذرت قراءة الأدوات المحفوظة. حاول مجددًا.',
     importPreview: 'معاينة الاستيراد',
     importApproveRegister: 'تسجيل المرشحين المعتمدين',
     importNoPreview: 'عاين الاستيراد قبل التسجيل.',
@@ -356,7 +488,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     importConflict: 'تعارض',
     importCredRefs: 'مراجع الاعتماد',
     importRegistered: 'نتيجة التسجيل',
-    trashNote: 'سلة المهملات ذات معنى تشغيلي: الخوادم المنقولة إليها غير نشطة ومزالة من القائمة النشطة. الاستعادة تعيد التحقق من الثقة؛ الحذف النهائي يتطلب تأكيدًا صريحًا.',
+    trashNote:
+      'سلة المهملات ذات معنى تشغيلي: الخوادم المنقولة إليها غير نشطة ومزالة من القائمة النشطة. الاستعادة تعيد التحقق من الثقة؛ الحذف النهائي يتطلب تأكيدًا صريحًا.',
     trashMoveAction: 'نقل المحدد إلى سلة المهملات',
     trashRestoreAction: 'استعادة المحدد',
     trashPermanentAction: 'حذف المحدد نهائيًا',
@@ -373,20 +506,25 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     actions: 'الإجراءات',
     testConnection: 'اختبار الاتصال',
     approveTrust: 'اعتماد الإعداد المُراجع',
-    trustInvalidated: 'تغيّر الإعداد؛ راجع واعتمد مرة أخرى قبل الإجراءات التشغيلية.',
+    trustInvalidated:
+      'تغيّر الإعداد؛ راجع واعتمد مرة أخرى قبل الإجراءات التشغيلية.',
     trustUntrusted: 'غير موثوق. الحفظ لا يعني الثقة.',
     trustTrusted: 'موثوق لبصمة الإعداد المُراجَع.',
     moveToTrash: 'نقل إلى سلة المهملات',
     restore: 'استعادة',
     permanentDelete: 'حذف نهائي',
-    confirmTrash: 'نقل هذا الخادم إلى سلة المهملات؟ سيصبح غير نشط تشغيليًا ويمكن استعادته.',
-    confirmPermanent: 'حذف إعداد هذا الخادم نهائيًا؟ لا يمكن التراجع. لن تُحذف مراجع بيانات الاعتماد المشتركة.',
+    confirmTrash:
+      'نقل هذا الخادم إلى سلة المهملات؟ سيصبح غير نشط تشغيليًا ويمكن استعادته.',
+    confirmPermanent:
+      'حذف إعداد هذا الخادم نهائيًا؟ لا يمكن التراجع. لن تُحذف مراجع بيانات الاعتماد المشتركة.',
     cancel: 'إلغاء',
     confirm: 'تأكيد',
     configDesiredDisabled: 'الإعداد معطّل (حالة مرغوبة)',
     configDesiredEnabled: 'الإعداد مفعّل (حالة مرغوبة)',
-    runtimeNote: 'يعرض V1 إعداد الخادم والثقة ونتائج الاختبار الملاحظة. ولا يدّعي ضمانات تنفيذ أدوات وقت التشغيل خارج السلوك المضيف المُتحقق منه.',
-    readOnlyTools: 'للقراءة فقط. لا توجد عناصر تحكم تفعيل/تعطيل لكل أداة في V1.',
+    runtimeNote:
+      'يعرض V1 إعداد الخادم والثقة ونتائج الاختبار الملاحظة. ولا يدّعي ضمانات تنفيذ أدوات وقت التشغيل خارج السلوك المضيف المُتحقق منه.',
+    readOnlyTools:
+      'للقراءة فقط. لا توجد عناصر تحكم تفعيل/تعطيل لكل أداة في V1.',
     listTools: 'عرض الأدوات المخزنة مؤقتًا',
     refreshTools: 'تحديث الأدوات (صريح)',
     toolsNever: 'لا يوجد تعداد مخزن مؤقتًا بعد. استخدم التحديث/الاختبار الصريح.',
@@ -417,21 +555,28 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     serverList: 'قائمة خوادم MCP',
     trashList: 'خوادم MCP في سلة المهملات',
     refreshAria: 'تحديث الخوادم',
+    more: 'المزيد من الإجراءات',
     editServer: 'تعديل',
     addTitle: 'إضافة خادم MCP',
     editTitle: 'تعديل خادم MCP',
-    formNote: 'الحفظ يخزّن الإعداد فقط ولا يمنح الثقة ولا يتصل بالخادم ولا يشغّله. راجع الإعداد المحفوظ واعتمده، ثم اختبر الاتصال بشكل منفصل.',
+    formNote:
+      'الحفظ يخزّن الإعداد فقط ولا يمنح الثقة ولا يتصل بالخادم ولا يشغّله. راجع الإعداد المحفوظ واعتمده، ثم اختبر الاتصال بشكل منفصل.',
     transportLabel: 'النقل',
     transportStdio: 'أمر محلي (stdio)',
     transportHttp: 'رابط بعيد (HTTP متدفق)',
-    nameHelp: 'أحرف وأرقام ونقطة وشرطة سفلية أو شرطة. يبدأ بحرف أو رقم. لا يمكن تغييره بعد الإنشاء.',
+    nameHelp:
+      'أحرف وأرقام ونقطة وشرطة سفلية أو شرطة. يبدأ بحرف أو رقم. لا يمكن تغييره بعد الإنشاء.',
     nameLocked: 'اسم الخادم ثابت بعد الإنشاء.',
-    argsHelp: 'معامل واحد في كل سطر. تُحفظ المعاملات التي تحتوي مسافات كما كُتبت.',
-    errCleared: 'إزالة قيمة محفوظة غير مدعومة حاليًا. أدخل قيمة جديدة أو أبقِ القيمة المحفوظة.',
+    argsHelp:
+      'معامل واحد في كل سطر. تُحفظ المعاملات التي تحتوي مسافات كما كُتبت.',
+    errCleared:
+      'إزالة قيمة محفوظة غير مدعومة حاليًا. أدخل قيمة جديدة أو أبقِ القيمة المحفوظة.',
     noChanges: 'لا توجد تغييرات للحفظ.',
     saveDone: 'تم حفظ الإعداد. راجعه واعتمده، ثم اختبر الاتصال بشكل منفصل.',
-    envHelp: 'مفتاح=قيمة واحد في كل سطر. خزّن الأسرار كمراجع ${credential:REF} وليس كقيم نصية.',
-    headersHelp: 'اسم: قيمة واحدة في كل سطر. خزّن الأسرار كمراجع ${credential:REF} وليس كقيم نصية.',
+    envHelp:
+      'مفتاح=قيمة واحد في كل سطر. خزّن الأسرار كمراجع ${credential:REF} وليس كقيم نصية.',
+    headersHelp:
+      'اسم: قيمة واحدة في كل سطر. خزّن الأسرار كمراجع ${credential:REF} وليس كقيم نصية.',
     advanced: 'خيارات متقدمة',
     startupTimeoutMs: 'مهلة البدء (ms)',
     toolCallTimeoutMs: 'مهلة استدعاء الأداة (ms)',
@@ -439,18 +584,25 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     saveServer: 'حفظ الإعداد',
     saving: 'جارٍ الحفظ…',
     errRequired: 'مطلوب.',
-    errNameInvalid: 'استخدم أحرفًا وأرقامًا ونقطة وشرطة سفلية أو شرطة؛ ابدأ بحرف أو رقم (128 كحد أقصى).',
+    errNameInvalid:
+      'استخدم أحرفًا وأرقامًا ونقطة وشرطة سفلية أو شرطة؛ ابدأ بحرف أو رقم (128 كحد أقصى).',
     errUrlInvalid: 'أدخل رابطًا صالحًا يبدأ بـ http:// أو https://.',
     errLineInvalid: 'استخدم مفتاح=قيمة في كل سطر.',
     errHeaderInvalid: 'استخدم اسم: قيمة في كل سطر.',
     errTimeoutInvalid: 'أدخل عددًا صحيحًا من المللي ثانية (0 أو أكثر).',
-    errSecretLiteral: 'يبدو هذا سرًا نصيًا. استبدله بمرجع ${credential:REF} قبل الحفظ.',
-    errSecretUrl: 'يحتوي الرابط على كلمة مرور أو رمز أو سر آخر. استخدم مرجع ${credential:REF} بدلًا من ذلك.',
-    errSecretArg: 'يبدو أحد المعاملات سرًا نصيًا. استبدله بمرجع ${credential:REF} قبل الحفظ.',
-    errRedactedLiteral: 'العنصر [REDACTED] ليس قيمة. أدخل مرجع ${credential:REF} بدلًا منه.',
+    errSecretLiteral:
+      'يبدو هذا سرًا نصيًا. استبدله بمرجع ${credential:REF} قبل الحفظ.',
+    errSecretUrl:
+      'يحتوي الرابط على كلمة مرور أو رمز أو سر آخر. استخدم مرجع ${credential:REF} بدلًا من ذلك.',
+    errSecretArg:
+      'يبدو أحد المعاملات سرًا نصيًا. استبدله بمرجع ${credential:REF} قبل الحفظ.',
+    errRedactedLiteral:
+      'العنصر [REDACTED] ليس قيمة. أدخل مرجع ${credential:REF} بدلًا منه.',
     keptNote: 'قيمة أو قيم سرية محفوظة كما هي.',
-    conflictReloaded: 'تغيّر الإعداد على القرص — أُعيد التحميل. راجعه ثم احفظ مرة أخرى.',
-    importPartialWarning: 'انتهى التسجيل مع مشكلات: تم تخطي بعض المرشحين أو رفضهم أو فشلهم. راجع النتيجة أدناه.',
+    conflictReloaded:
+      'تغيّر الإعداد على القرص — أُعيد التحميل. راجعه ثم احفظ مرة أخرى.',
+    importPartialWarning:
+      'انتهى التسجيل مع مشكلات: تم تخطي بعض المرشحين أو رفضهم أو فشلهم. راجع النتيجة أدناه.',
     errExists: 'يوجد خادم بهذا الاسم بالفعل. اختر اسمًا آخر.',
     envLabel: 'متغيرات البيئة (مفتاح=قيمة)',
     headersLabel: 'الترويسات (اسم: قيمة)',
@@ -467,14 +619,23 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     toastDeleted: 'تم الحذف نهائيًا',
     statusSaved: 'محفوظ في الإعداد',
     statusNotSaved: 'غير محفوظ',
-    statusRestart: 'قد يلزم إعادة التشغيل — لم يتم التحقق من تطبيقه على وقت التشغيل',
-    statusRestartNote: 'تحفظ Waycraft الإعداد؛ ولا تستطيع التأكد من أن وقت تشغيل DSH الجاري قد التقطه.',
-    testNever: 'لم يُختبر في هذه الجلسة',
+    statusRestart:
+      'قد يلزم إعادة التشغيل — لم يتم التحقق من تطبيقه على وقت التشغيل',
+    statusRestartNote:
+      'تحفظ Waycraft الإعداد؛ ولا تستطيع التأكد من أن وقت تشغيل DSH الجاري قد التقطه.',
+    connectionOff: 'معطّل في الإعداد؛ لم يتم التحقق من حالة التشغيل',
+    connectionReview: 'مراجعة الثقة مطلوبة؛ لم يتم التحقق من الاتصال',
+    connectionPassed: 'نجح آخر فحص اتصال؛ ليست مراقبة مباشرة',
+    connectionFailed: 'فشل آخر فحص اتصال؛ ليست مراقبة مباشرة',
+    connectionUnknown: 'حالة الاتصال غير معروفة؛ لا يوجد فحص اتصال محفوظ',
+    checkedAt: 'آخر فحص: {time}',
+    testNever: 'لا يوجد فحص اتصال محفوظ',
     testBadgeNever: 'غير مُختبر',
     testPassed: 'نجح الاختبار',
     testFailed: 'فشل الاختبار',
     testOutcome: 'نتيجة الاختبار',
-    testPendingNote: 'شغّل اختبار الاتصال للتحقق من الخادم. الاختبار لا يعتمد الثقة.',
+    testPendingNote:
+      'شغّل اختبار الاتصال للتحقق من الخادم. الاختبار لا يعتمد الثقة.',
     configOff: 'مُعطّل في الإعداد',
     configEnabled: 'مفعّل في الإعداد',
     trustBadgeTrusted: 'موثوق',
@@ -483,17 +644,23 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     statTrusted: 'موثوقة',
     statNeedsReview: 'تحتاج مراجعة',
     statOff: 'مُعطّلة في الإعداد',
-    configOffHelp: 'هذا المفتاح يسجّل علامة الإعداد فقط. فرض التشغيل في DSH غير متحقق منه، لذا قد يظل الخادم يعمل.',
+    configOffHelp:
+      'هذا المفتاح يسجّل علامة الإعداد فقط. فرض التشغيل في DSH غير متحقق منه، لذا قد يظل الخادم يعمل.',
     importResultRegistered: 'تم تسجيل {n} خادم.',
     importResultReplaced: 'تم استبدال {n} خادم موجود.',
-    importResultSkipped: 'تم تخطي {n} لأن خادمًا بهذا الاسم موجود. اختر «استبدال» لكتابته فوقه.',
+    importResultSkipped:
+      'تم تخطي {n} لأن خادمًا بهذا الاسم موجود. اختر «استبدال» لكتابته فوقه.',
     importResultRejected: 'تم رفض {n} مرشح فشل في التحقق.',
     importResultFailed: 'فشل {n} مرشح بسبب خطأ.',
     importResultNone: 'لم يتم تسجيل أي شيء.',
-    importResultNote: 'التسجيل لا يعتمد الثقة ولا يشغّل أي خادم. راجعها واختبرها بشكل منفصل.',
+    importResultNote:
+      'التسجيل لا يعتمد الثقة ولا يشغّل أي خادم. راجعها واختبرها بشكل منفصل.',
   };
 
-  effect(() => ctx.locale.register(NS, { en, ar }), 'dsh-waycraft: mcp dictionaries');
+  effect(
+    () => ctx.locale.register(NS, { en, ar }),
+    'dsh-waycraft: mcp dictionaries',
+  );
   const t = ctx.locale.bind(NS);
   const isArabic = () => ctx.locale.language?.getSnapshot?.() === 'ar';
 
@@ -507,11 +674,19 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     const data = await response.json().catch(() => ({}));
     if (response.status === 401 || response.status === 403) {
       const err: any = new Error(data?.error || 'unauthorized');
-      err.code = data?.code || 'unauthorized'; err.status = response.status; err.data = data; throw err;
+      err.code = data?.code || 'unauthorized';
+      err.status = response.status;
+      err.data = data;
+      throw err;
     }
     if (!response.ok || data?.ok === false) {
-      const err: any = new Error(data?.error || data?.message || `HTTP ${response.status}`);
-      err.code = data?.code; err.status = response.status; err.data = data; throw err;
+      const err: any = new Error(
+        data?.error || data?.message || `HTTP ${response.status}`,
+      );
+      err.code = data?.code;
+      err.status = response.status;
+      err.data = data;
+      throw err;
     }
     return data;
   }
@@ -519,17 +694,41 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   // Guided form model (#174 A). Fields are strings as typed; buildConfig() maps them to the host shape.
   // Error values are i18n keys (or null), so the same logic serves EN and AR.
   const emptyForm = (overrides: any = {}) => ({
-    mode: 'create', originalName: '', transport: 'stdio', serverName: '', command: '', args: '', cwd: '',
-    env: '', url: '', headers: '', startupTimeoutMs: '', toolCallTimeoutMs: '', advanced: false, ...overrides,
+    mode: 'create',
+    originalName: '',
+    transport: 'stdio',
+    serverName: '',
+    command: '',
+    args: '',
+    cwd: '',
+    env: '',
+    url: '',
+    headers: '',
+    startupTimeoutMs: '',
+    toolCallTimeoutMs: '',
+    advanced: false,
+    ...overrides,
   });
   // One argument per line. Each line is trimmed and blank lines are dropped; inner spaces are kept.
-  const parseArgs = (text: string): string[] => text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  const parseKv = (text: string, sep: string): { map: Record<string, string>; bad: boolean } => {
-    const map: Record<string, string> = {}; let bad = false;
+  const parseArgs = (text: string): string[] =>
+    text
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  const parseKv = (
+    text: string,
+    sep: string,
+  ): { map: Record<string, string>; bad: boolean } => {
+    const map: Record<string, string> = {};
+    let bad = false;
     for (const raw of text.split(/\n+/)) {
-      const line = raw.trim(); if (!line) continue;
+      const line = raw.trim();
+      if (!line) continue;
       const i = line.indexOf(sep);
-      if (i <= 0) { bad = true; continue; }
+      if (i <= 0) {
+        bad = true;
+        continue;
+      }
       map[line.slice(0, i).trim()] = line.slice(i + sep.length).trim();
     }
     return { map, bad };
@@ -537,11 +736,20 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   function validateForm(f: any, original?: any): Record<string, string> {
     const errors: Record<string, string> = {};
     // Saved secrets the host masked as [REDACTED] are kept as stored: those fields are read-only and not validated.
-    const kept = original ? keptSecrets(original) : {} as Record<string, number>;
+    const kept = original
+      ? keptSecrets(original)
+      : ({} as Record<string, number>);
     // Edit cannot clear a saved optional field: the host merges patches and has no clear-by-null contract.
     if (original) {
       const saved = formFromServer(original);
-      for (const key of ['cwd', 'env', 'headers', 'args', 'startupTimeoutMs', 'toolCallTimeoutMs'])
+      for (const key of [
+        'cwd',
+        'env',
+        'headers',
+        'args',
+        'startupTimeoutMs',
+        'toolCallTimeoutMs',
+      ])
         if (saved[key].trim() && !f[key].trim()) errors[key] = 'errCleared';
     }
     const name = f.serverName.trim();
@@ -549,7 +757,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     else if (!NAME_RE.test(name)) errors.serverName = 'errNameInvalid';
     if (f.transport === 'stdio') {
       if (!f.command.trim()) errors.command = 'errCommandRequired';
-      else if (f.command.trim() === REDACTED && !kept.command) errors.command = 'errRedactedLiteral';
+      else if (f.command.trim() === REDACTED && !kept.command)
+        errors.command = 'errRedactedLiteral';
     } else if (!kept.url) {
       const url = f.url.trim();
       if (!url) errors.url = 'errUrlRequired';
@@ -567,67 +776,107 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       if (!kept.env) {
         const env = parseKv(f.env, '=');
         if (env.bad) errors.env = 'errLineInvalid';
-        else if (Object.values(env.map).includes(REDACTED)) errors.env = 'errRedactedLiteral';
-        else if (Object.entries(env.map).some(([k, v]) => v && isPlainSecret(k, v))) errors.env = 'errSecretLiteral';
+        else if (Object.values(env.map).includes(REDACTED))
+          errors.env = 'errRedactedLiteral';
+        else if (
+          Object.entries(env.map).some(([k, v]) => v && isPlainSecret(k, v))
+        )
+          errors.env = 'errSecretLiteral';
       }
     } else if (!kept.headers) {
       const headers = parseKv(f.headers, ':');
       if (headers.bad) errors.headers = 'errHeaderInvalid';
-      else if (Object.values(headers.map).includes(REDACTED)) errors.headers = 'errRedactedLiteral';
-      else if (Object.entries(headers.map).some(([k, v]) => v && isPlainSecret(k, v))) errors.headers = 'errSecretLiteral';
+      else if (Object.values(headers.map).includes(REDACTED))
+        errors.headers = 'errRedactedLiteral';
+      else if (
+        Object.entries(headers.map).some(([k, v]) => v && isPlainSecret(k, v))
+      )
+        errors.headers = 'errSecretLiteral';
     }
     // Digits only: a timeout is a whole number of milliseconds, so "1.5", "-1" and "1e3" are rejected.
     for (const field of ['startupTimeoutMs', 'toolCallTimeoutMs'])
-      if (f[field].trim() && !/^\d+$/.test(f[field].trim())) errors[field] = 'errTimeoutInvalid';
+      if (f[field].trim() && !/^\d+$/.test(f[field].trim()))
+        errors[field] = 'errTimeoutInvalid';
     return errors;
   }
   function buildConfig(f: any): any {
-    const config: any = { serverName: f.serverName.trim(), transport: f.transport };
+    const config: any = {
+      serverName: f.serverName.trim(),
+      transport: f.transport,
+    };
     if (f.transport === 'stdio') {
       config.command = f.command.trim();
-      const args = parseArgs(f.args); if (args.length) config.args = args;
+      const args = parseArgs(f.args);
+      if (args.length) config.args = args;
       if (f.cwd.trim()) config.cwd = f.cwd.trim();
-      const env = parseKv(f.env, '=').map; if (Object.keys(env).length) config.env = env;
+      const env = parseKv(f.env, '=').map;
+      if (Object.keys(env).length) config.env = env;
     } else {
       config.url = f.url.trim();
-      const headers = parseKv(f.headers, ':').map; if (Object.keys(headers).length) config.headers = headers;
+      const headers = parseKv(f.headers, ':').map;
+      if (Object.keys(headers).length) config.headers = headers;
     }
-    if (f.startupTimeoutMs.trim()) config.startupTimeoutMs = Number(f.startupTimeoutMs);
-    if (f.toolCallTimeoutMs.trim()) config.toolCallTimeoutMs = Number(f.toolCallTimeoutMs);
+    if (f.startupTimeoutMs.trim())
+      config.startupTimeoutMs = Number(f.startupTimeoutMs);
+    if (f.toolCallTimeoutMs.trim())
+      config.toolCallTimeoutMs = Number(f.toolCallTimeoutMs);
     return config;
   }
   function formFromServer(server: any): any {
     const c = server?.config || {};
-    const kv = (o: any, sep: string) => Object.entries(o || {}).map(([k, v]) => `${k}${sep}${v}`).join('\n');
+    const kv = (o: any, sep: string) =>
+      Object.entries(o || {})
+        .map(([k, v]) => `${k}${sep}${v}`)
+        .join('\n');
     return emptyForm({
-      mode: 'edit', originalName: c.serverName || server.serverName, transport: c.transport === 'streamable-http' ? 'streamable-http' : 'stdio',
-      serverName: c.serverName || server.serverName, command: c.command || '', args: (c.args || []).join('\n'), cwd: c.cwd || '',
-      env: kv(c.env, '='), url: c.url || '', headers: kv(c.headers, ': '),
-      startupTimeoutMs: c.startupTimeoutMs == null ? '' : String(c.startupTimeoutMs),
-      toolCallTimeoutMs: c.toolCallTimeoutMs == null ? '' : String(c.toolCallTimeoutMs),
+      mode: 'edit',
+      originalName: c.serverName || server.serverName,
+      transport:
+        c.transport === 'streamable-http' ? 'streamable-http' : 'stdio',
+      serverName: c.serverName || server.serverName,
+      command: c.command || '',
+      args: (c.args || []).join('\n'),
+      cwd: c.cwd || '',
+      env: kv(c.env, '='),
+      url: c.url || '',
+      headers: kv(c.headers, ': '),
+      startupTimeoutMs:
+        c.startupTimeoutMs == null ? '' : String(c.startupTimeoutMs),
+      toolCallTimeoutMs:
+        c.toolCallTimeoutMs == null ? '' : String(c.toolCallTimeoutMs),
     });
   }
   // Edit sends only changed fields that still have a value. serverName is never in the patch (immutable).
   // The host merges patches shallowly and has no clear-by-null contract, so an emptied optional field
   // is not sent; the stored value stays until a new value is saved (surfaced as a note in the form).
   function buildPatch(f: any, original: any): any {
-    const next = buildConfig(f); const prev = buildConfig(formFromServer(original));
+    const next = buildConfig(f);
+    const prev = buildConfig(formFromServer(original));
     const patch: any = {};
     for (const k of Object.keys(next)) {
       if (k === 'serverName') continue;
-      if (JSON.stringify(next[k]) !== JSON.stringify(prev[k])) patch[k] = next[k];
+      if (JSON.stringify(next[k]) !== JSON.stringify(prev[k]))
+        patch[k] = next[k];
     }
     return patch;
   }
 
-  function ltr(value: any) { return h('bdi', { dir: 'ltr', style: { unicodeBidi: 'isolate' } }, value == null ? '' : String(value)); }
+  function ltr(value: any) {
+    return h(
+      'bdi',
+      { dir: 'ltr', style: { unicodeBidi: 'isolate' } },
+      value == null ? '' : String(value),
+    );
+  }
   function statusLabel(server: any) {
     if (server?.trash?.trashed) return t('filterTrashed');
     if (server?.disabled) return t('configDesiredDisabled');
     return t('configDesiredEnabled');
   }
   // The host reports `trust.state`; `status` is accepted too so older payloads still render.
-  function trustOf(trust: any): string { return String(trust?.state ?? trust?.status ?? 'untrusted'); }
+  function trustOf(trust: any): string {
+    return String(trust?.state ?? trust?.status ?? 'untrusted');
+  }
   function trustLabel(trust: any) {
     const st = trustOf(trust);
     if (st === 'trusted') return t('trustTrusted');
@@ -642,17 +891,34 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   }
   // #174 B: Saved, runtime and test are separate outcomes. Waycraft never reports "Applied":
   // it cannot observe the running DSH runtime, so a saved change is always "restart may be required".
-  function savedLabel(server: any) { return server ? t('statusSaved') : t('statusNotSaved'); }
-  function testLabel(result: { ok: boolean; message: string } | undefined) {
+  function savedLabel(server: any) {
+    return server ? t('statusSaved') : t('statusNotSaved');
+  }
+  function checkedAtLabel(checkedAt?: string) {
+    if (!checkedAt || !Number.isFinite(Date.parse(checkedAt))) return '';
+    const time = new Date(checkedAt).toLocaleString(isArabic() ? 'ar' : 'en');
+    return t('checkedAt').replace('{time}', time);
+  }
+  function testLabel(
+    result: { ok: boolean; message: string; checkedAt?: string } | undefined,
+  ) {
     if (!result) return t('testNever');
-    return result.ok ? `${t('testPassed')}: ${result.message}` : `${t('testFailed')}: ${result.message}`;
+    return [
+      t(result.ok ? 'connectionPassed' : 'connectionFailed'),
+      result.message,
+      checkedAtLabel(result.checkedAt),
+    ]
+      .filter(Boolean)
+      .join(' · ');
   }
   // #174 C: plain sentences per import outcome, instead of raw JSON counters.
   function importSummary(stats: any): string[] {
     const n = (k: string) => Number(stats?.[k] || 0);
-    const pick = (key: string, count: number) => t(key).replace('{n}', String(count));
+    const pick = (key: string, count: number) =>
+      t(key).replace('{n}', String(count));
     const lines: string[] = [];
-    if (n('registered')) lines.push(pick('importResultRegistered', n('registered')));
+    if (n('registered'))
+      lines.push(pick('importResultRegistered', n('registered')));
     if (n('replaced')) lines.push(pick('importResultReplaced', n('replaced')));
     if (n('skipped')) lines.push(pick('importResultSkipped', n('skipped')));
     if (n('rejected')) lines.push(pick('importResultRejected', n('rejected')));
@@ -668,7 +934,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 
 /* ===== Header ===== */
 .waycraft-mcp-header{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.waycraft-mcp-title{margin:0;flex:1 1 auto;font-size:18px;line-height:26px;font-weight:600;color:var(--dsw-alias-label-primary)}
+.waycraft-mcp-title{margin:0;flex:1 1 auto;font-size:18px;line-height:26px;font-weight:500;color:var(--dsw-alias-label-primary)}
 
 /* ===== Toolbar / filters ===== */
 .waycraft-mcp-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -714,7 +980,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp-seg{display:flex;flex-wrap:wrap;gap:4px;background:var(--dsw-alias-bg-layer-1);border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md,12px);padding:4px}
 .waycraft-mcp-seg button{flex:0 1 auto;min-block-size:32px;padding-inline:12px;border:none;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit}
 .waycraft-mcp-seg button:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
-.waycraft-mcp-seg button[aria-pressed="true"],.waycraft-mcp-seg button[aria-checked="true"],.waycraft-mcp-seg button[aria-selected="true"]{background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-weight:600}
+.waycraft-mcp-seg button[aria-pressed="true"],.waycraft-mcp-seg button[aria-checked="true"],.waycraft-mcp-seg button[aria-selected="true"]{background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-weight:500}
 .waycraft-mcp-seg button:disabled{opacity:.5;cursor:not-allowed}
 
 /* ===== Panels & KV ===== */
@@ -736,6 +1002,12 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp-alert{margin:0;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-state-error-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
 .waycraft-mcp-alert.waycraft-mcp-alert-warn{background:var(--dsw-alias-state-warning-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-warning-primary)}
 .waycraft-mcp-field-error{margin:0;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-state-error-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
+.waycraft-mcp-dropzone{border:1px dashed var(--dsw-alias-border-l3);border-radius:12px;padding:20px;text-align:center;background:var(--dsw-alias-bg-layer-1)}
+.waycraft-mcp-file-choice{position:relative;display:inline-flex;padding:6px 12px;color:var(--dsw-alias-state-business-primary);border-radius:8px;cursor:pointer}
+.waycraft-mcp-file-choice input[type=file]{position:absolute;inset:0;inline-size:100%;block-size:100%;opacity:0;cursor:pointer}
+.waycraft-mcp-file-choice:focus-within{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
+.waycraft-mcp-file-choice:hover{background:var(--dsw-alias-bg-layer-3)}
+.waycraft-mcp-dialog-body>.waycraft-mcp-card{border:0;background:transparent;border-radius:0;overflow:visible}
 .waycraft-mcp-dialog-sm{inline-size:min(440px,100%)}
 .waycraft-mcp-confirm-msg{margin:0;line-height:20px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
 .waycraft-mcp button.waycraft-mcp-danger-solid{background:var(--dsw-alias-state-error-primary);border-color:transparent;color:var(--dsw-alias-label-primary-foreground,var(--dsw-alias-bg-base))}
@@ -755,7 +1027,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp-overlay{position:fixed;inset:0;z-index:1000;container-type:normal;max-inline-size:none;inline-size:auto;display:flex;align-items:center;justify-content:center;padding:16px;background:color-mix(in srgb,var(--dsw-alias-bg-base) 60%,transparent);overflow:auto}
 .waycraft-mcp-dialog{container-type:inline-size;inline-size:min(600px,100%);max-block-size:calc(100dvh - 32px);display:flex;flex-direction:column;overflow:hidden;border:0.5px solid var(--dsw-alias-border-l3,var(--dsw-alias-border-l2));border-radius:var(--dsw-radius-xl,20px);background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-soft,var(--dsw-shadow-lv3))}
 .waycraft-mcp-dialog-head{padding:16px 24px;border-block-end:0.5px solid var(--dsw-alias-border-l2)}
-.waycraft-mcp-dialog-head h3{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.waycraft-mcp-dialog-head h3{margin:0;font-size:16px;line-height:24px;font-weight:500}
 .waycraft-mcp-dialog-body{display:flex;flex-direction:column;gap:16px;padding:24px;overflow:auto;min-block-size:0}
 .waycraft-mcp-dialog-footer{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:16px 24px;border-block-start:0.5px solid var(--dsw-alias-border-l2)}
 .waycraft-mcp-fields{display:grid;gap:12px}
@@ -769,7 +1041,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp-advanced>summary{cursor:pointer;min-block-size:28px;color:var(--dsw-alias-label-secondary)}
 .waycraft-mcp-advanced>.waycraft-mcp-fields{padding-block:8px}
 .waycraft-mcp-preview{display:flex;flex-direction:column;gap:4px}
-@container (min-width: 480px){.waycraft-mcp-fields{grid-template-columns:1fr 1fr}.waycraft-mcp-fields>.waycraft-mcp-field:first-child:last-child{grid-column:1/-1}}
+@container (min-width:480px){.waycraft-mcp-advanced .waycraft-mcp-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* ===== Structure aligned with the Skill manager (stats strip, expandable rows, joined icon bar) ===== */
 .waycraft-mcp-stack{display:flex;flex-direction:column;gap:12px}
@@ -777,21 +1049,27 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp-stat{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;text-align:center;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
 .waycraft-mcp-stat+.waycraft-mcp-stat{border-inline-start:0.5px solid var(--dsw-alias-border-l2)}
 .waycraft-mcp-stat strong{font-size:18px;line-height:26px;color:var(--dsw-alias-label-primary)}
-.waycraft-mcp-toolbar input{flex:1 1 160px}
+.waycraft-mcp .waycraft-mcp-toolbar input:not([type=checkbox]):not([type=radio]){flex:1 1 180px;block-size:32px;min-block-size:32px;padding-block:0}
 .waycraft-mcp-toolbar select{flex:0 1 150px;max-inline-size:240px}
-.waycraft-mcp-filterrow select{flex:0 1 150px;max-inline-size:240px}
+.waycraft-mcp-filterrow select{inline-size:100%}
 .waycraft-mcp-iconbar{display:inline-flex;flex:none;align-items:stretch;block-size:32px;margin-inline-start:auto;border:0.5px solid var(--dsw-alias-border-l4,var(--dsw-alias-border-l2));border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);overflow:hidden}
 .waycraft-mcp .waycraft-mcp-iconbar button.waycraft-mcp-icon-btn{inline-size:32px;block-size:100%;min-block-size:0;border-radius:0;color:var(--dsw-alias-label-secondary)}
 .waycraft-mcp .waycraft-mcp-iconbar button.waycraft-mcp-icon-btn+button.waycraft-mcp-icon-btn{border-inline-start:0.5px solid var(--dsw-alias-border-l2)}
 .waycraft-mcp .waycraft-mcp-iconbar button.waycraft-mcp-icon-btn:focus-visible{outline-offset:-2px}
-.waycraft-mcp-row-head{display:flex;align-items:center;gap:8px;min-block-size:44px;padding:8px 16px}
+.waycraft-mcp-row-head{position:relative;display:flex;align-items:center;gap:8px;min-block-size:44px;padding:8px 16px}
+/* Extend the native disclosure button across the summary without nesting its other controls. */
+.waycraft-mcp-row-head button.waycraft-mcp-row-toggle::after{content:"";position:absolute;inset:0}
+.waycraft-mcp-row-actions,.waycraft-mcp-row-head>.waycraft-mcp-switch,.waycraft-mcp-row-head>.waycraft-mcp-expand{position:relative;z-index:1}
 .waycraft-mcp-row-head[data-off]>.waycraft-mcp-row-toggle{opacity:.6}
-.waycraft-mcp .waycraft-mcp-row-toggle{flex:1 1 auto;display:flex;align-items:center;gap:8px;min-inline-size:0;padding:0;border:0;background:transparent;text-align:start;cursor:pointer;border-radius:var(--dsw-radius-sm,8px)}
+.waycraft-mcp .waycraft-mcp-row-toggle{flex:0 1 auto;display:flex;align-items:center;gap:8px;min-inline-size:0;padding:0;border:0;background:transparent;text-align:start;cursor:pointer;border-radius:var(--dsw-radius-sm,8px)}
 .waycraft-mcp div.waycraft-mcp-row-toggle{cursor:default}
 .waycraft-mcp .waycraft-mcp-row-toggle:hover:not(:disabled){background:transparent}
-.waycraft-mcp-row-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;min-inline-size:0}
+.waycraft-mcp-row-title{min-inline-size:0}
 .waycraft-mcp-row-title strong{font-weight:600;overflow-wrap:anywhere}
-.waycraft-mcp-row-sub{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;font-weight:400}
+.waycraft-mcp-row-sub{flex:1 1 0;min-inline-size:0;margin-inline-start:auto;text-align:end;color:var(--dsw-alias-label-secondary);font-size:14px;line-height:22px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.waycraft-mcp-row-head button.waycraft-mcp-icon-btn{flex:none;inline-size:28px;block-size:28px;min-block-size:28px;border-radius:var(--dsw-radius-sm,8px);color:var(--dsw-alias-label-tertiary)}
+.waycraft-mcp-row-head button.waycraft-mcp-icon-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-label-primary)}
+.waycraft-mcp-row-head>.waycraft-mcp-status{margin-inline:4px}
 .waycraft-mcp-chev{flex:none;inline-size:6px;block-size:6px;margin-inline:4px;border-inline-end:1.5px solid var(--dsw-alias-label-tertiary);border-block-end:1.5px solid var(--dsw-alias-label-tertiary);transform:rotate(-45deg);transition:transform .2s cubic-bezier(.4,0,.2,1)}
 .waycraft-mcp-card:dir(rtl) .waycraft-mcp-chev{transform:rotate(135deg)}
 .waycraft-mcp-card.is-open .waycraft-mcp-chev,.waycraft-mcp-card.is-open:dir(rtl) .waycraft-mcp-chev{transform:rotate(45deg)}
@@ -799,8 +1077,10 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp-card-body{padding:12px 16px;gap:12px}
 .waycraft-mcp-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 /* ===== Skill-manager-aligned filter row, area tabs, detail tabs, row actions ===== */
-.waycraft-mcp-filterrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.waycraft-mcp-filterrow>select{flex:0 1 200px;min-inline-size:140px}
+.waycraft-mcp-filterrow{display:flex;gap:8px;flex-wrap:wrap}
+.waycraft-mcp-filterrow select{flex:0 1 150px;min-inline-size:0;max-inline-size:240px}
+@container (max-width:520px){.waycraft-mcp-filterrow select{flex:1 1 100%;max-inline-size:none}}
+@supports not (container-type:inline-size){@media (max-width:520px){.waycraft-mcp-filterrow select{flex:1 1 100%;max-inline-size:none}}}
 .waycraft-mcp-header+.waycraft-mcp-seg,.waycraft-mcp>.waycraft-mcp-seg{display:inline-flex;max-inline-size:100%;align-self:flex-start}
 .waycraft-mcp-seg button{display:inline-flex;align-items:center;gap:8px;padding-inline:8px;min-block-size:28px}
 .waycraft-mcp-seg button svg{flex:none;color:var(--dsw-alias-label-secondary)}
@@ -812,7 +1092,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp .waycraft-mcp-row-actions button.waycraft-mcp-icon-btn:hover:not(:disabled){color:var(--dsw-alias-label-primary)}
 .waycraft-mcp .waycraft-mcp-row-actions button.waycraft-mcp-icon-btn.waycraft-mcp-attn{color:var(--dsw-alias-brand-primary)}
 .waycraft-mcp .waycraft-mcp-row-actions button.waycraft-mcp-icon-btn.waycraft-mcp-danger{color:var(--dsw-alias-state-error-primary)}
-@container (max-width: 520px){.waycraft-mcp-row-head{flex-wrap:wrap}.waycraft-mcp .waycraft-mcp-row-head>.waycraft-mcp-row-toggle{flex:1 1 100%}}
+@container (max-width:520px){.waycraft-mcp-row-head{flex-wrap:wrap}.waycraft-mcp .waycraft-mcp-row-head>.waycraft-mcp-row-toggle{flex:1 1 auto;min-inline-size:4ch;white-space:nowrap}.waycraft-mcp-row-sub{display:none}}
 .waycraft-mcp-spacer{flex:1 1 0}
 .waycraft-mcp-detail{display:flex;flex-direction:column;gap:12px}
 .waycraft-mcp-note{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
@@ -832,8 +1112,8 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 .waycraft-mcp-badge-warn{background:var(--dsw-alias-state-warning-bg,var(--dsw-alias-bg-layer-3));border-color:var(--dsw-alias-state-warning-border,var(--dsw-alias-border-l2));color:var(--dsw-alias-state-warning-primary)}
 
 /* ===== Switch (toggle) ===== */
-.waycraft-mcp-switch{box-sizing:border-box;position:relative;display:flex;align-items:center;justify-content:flex-start;flex:0 0 auto;inline-size:36px;min-inline-size:36px;block-size:20px;min-block-size:0;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);font-size:0;line-height:0;cursor:pointer}
-.waycraft-mcp-switch[aria-checked=true]{background:var(--dsw-alias-brand-primary)}
+.waycraft-mcp button.waycraft-mcp-switch{box-sizing:border-box;position:relative;display:flex;align-items:center;justify-content:flex-start;flex:0 0 auto;inline-size:36px;min-inline-size:36px;block-size:20px;min-block-size:0;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);font-size:0;line-height:0;cursor:pointer}
+.waycraft-mcp button.waycraft-mcp-switch[aria-checked=true]{background:var(--dsw-alias-brand-primary)}
 .waycraft-mcp-switch:hover:not(:disabled),.waycraft-mcp-switch:active:not(:disabled){background:var(--dsw-alias-border-l3)}
 .waycraft-mcp-switch[aria-checked=true]:hover:not(:disabled),.waycraft-mcp-switch[aria-checked=true]:active:not(:disabled){background:var(--dsw-alias-brand-primary)}
 .waycraft-mcp-switch:disabled{cursor:default;opacity:.5}
@@ -852,6 +1132,29 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 @container (max-width: 520px){.waycraft-mcp-source-meta .waycraft-mcp-path{display:none}}
 @supports not (container-type:inline-size){@media (max-width:520px){.waycraft-mcp-source-meta .waycraft-mcp-path{display:none}}}
 
+/* Local variants keep generic button rules from overriding geometry. */
+.waycraft-mcp button.waycraft-mcp-switch:hover:not(:disabled),.waycraft-mcp button.waycraft-mcp-switch:active:not(:disabled){background:var(--dsw-alias-border-l3)}
+.waycraft-mcp button.waycraft-mcp-switch[aria-checked=true]:hover:not(:disabled),.waycraft-mcp button.waycraft-mcp-switch[aria-checked=true]:active:not(:disabled){background:var(--dsw-alias-brand-primary)}
+.waycraft-mcp-status{flex:none;inline-size:8px;block-size:8px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}
+.waycraft-mcp-status-success{background:var(--dsw-alias-state-success-primary,#15803d)}
+.waycraft-mcp-status-error{background:var(--dsw-alias-state-error-primary)}
+.waycraft-mcp-status-warning{background:var(--dsw-alias-state-warning-primary,#b45309)}
+.waycraft-mcp-status-unknown{background:transparent;box-shadow:inset 0 0 0 1.5px var(--dsw-alias-label-tertiary)}
+.waycraft-mcp-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.waycraft-mcp-dialog-head h3{font-weight:500}
+.waycraft-mcp-dialog-body .waycraft-mcp-notice{background:transparent;padding:0;color:var(--dsw-alias-label-secondary);font-size:13px}
+.waycraft-mcp-dialog-body .waycraft-mcp-seg{align-self:flex-start}
+.waycraft-mcp-dialog-footer button{min-block-size:36px;border-radius:var(--dsw-radius-md,12px)}
+.waycraft-mcp-menu{position:fixed;z-index:1050;container-type:normal;inline-size:max-content;max-inline-size:calc(100vw - 16px);max-block-size:calc(100dvh - 16px);overflow:auto;padding:4px;border-radius:var(--dsw-radius-md,12px);background:var(--dsw-menu-surface-fill,var(--dsw-alias-bg-layer-2));backdrop-filter:var(--dsw-menu-backdrop-filter,none);box-shadow:var(--dsw-elevation-prominent,var(--dsw-elevation-panel,var(--dsw-shadow-lv3)));gap:0;box-sizing:border-box}
+.waycraft-mcp-menu[hidden]{display:none}
+/* Installed DSH Menu item geometry, adapted without a private host import. */
+.waycraft-mcp-menu button.waycraft-mcp-icon-btn{display:flex;justify-content:flex-start;gap:6px;inline-size:100%;padding:6px 8px;block-size:auto;min-block-size:34px;border-radius:var(--dsw-radius-md,12px);font-size:13px;line-height:20px;white-space:nowrap;text-align:start}
+.waycraft-mcp-menu button.waycraft-mcp-icon-btn svg{inline-size:14px;block-size:14px;flex:none;color:var(--dsw-alias-menu-icon,var(--dsw-alias-label-secondary))}
+.waycraft-mcp-menu button.waycraft-mcp-icon-btn:focus-visible{background:var(--dsw-alias-interactive-bg-hover);outline:none}
+@media (hover:hover){.waycraft-mcp-menu button.waycraft-mcp-icon-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}}
+@media (hover:hover){.waycraft-mcp-row-head:hover{background:var(--dsw-alias-interactive-bg-hover)}.waycraft-mcp-badge:hover{border-color:var(--dsw-alias-border-l3)}}
+@media (max-width:520px){.waycraft-mcp-dialog-head,.waycraft-mcp-dialog-footer{padding:16px}.waycraft-mcp-dialog-body{padding:16px}.waycraft-mcp-dialog-footer button{flex:1 1 auto}}
+@media (pointer:coarse){.waycraft-mcp input:not([type=checkbox]),.waycraft-mcp textarea,.waycraft-mcp select{font-size:16px}}
 /* ===== Stats ===== */
 .waycraft-mcp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:0.5px solid var(--dsw-alias-settings-card-stroke,var(--dsw-alias-border-l2));border-radius:var(--dsw-radius-xl,20px);background:var(--dsw-alias-settings-card-fill,var(--dsw-alias-bg-layer-2));overflow:hidden}
 .waycraft-mcp-stat{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;text-align:center;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
@@ -860,7 +1163,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
 
 /* ===== Source card ===== */
 .waycraft-mcp-source{border:0.5px solid var(--dsw-alias-settings-card-stroke,var(--dsw-alias-border-l2));border-radius:var(--dsw-radius-xl,20px);background:var(--dsw-alias-settings-card-fill,var(--dsw-alias-bg-layer-2));overflow:hidden}
-.waycraft-mcp-source>summary{display:flex;align-items:center;gap:8px;min-block-size:44px;padding:8px 16px;cursor:pointer;font-weight:600;list-style:none}
+.waycraft-mcp-source>summary{display:flex;align-items:center;gap:8px;min-block-size:44px;padding:8px 16px;cursor:pointer;font-weight:500;list-style:none}
 .waycraft-mcp-source>summary::-webkit-details-marker{display:none}
 .waycraft-mcp-chev{flex:none;inline-size:6px;block-size:6px;margin-inline:4px;border-inline-end:1.5px solid var(--dsw-alias-label-tertiary);border-block-end:1.5px solid var(--dsw-alias-label-tertiary);transform:rotate(-45deg);transition:transform .2s cubic-bezier(.4,0,.2,1)}
 .waycraft-mcp-source:dir(rtl) .waycraft-mcp-chev{transform:rotate(135deg)}
@@ -906,12 +1209,21 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   // Technical tokens inside prose render LTR: splits on the capturing TECH_TOKEN pattern and wraps the matches in ltr().
   const withTech = (text: any): any => {
     const parts = String(text).split(TECH_TOKEN);
-    return parts.length === 1 ? text : h(React.Fragment, null, ...parts.map((p, i) => (i % 2 ? ltr(p) : p)));
+    return parts.length === 1
+      ? text
+      : h(React.Fragment, null, ...parts.map((p, i) => (i % 2 ? ltr(p) : p)));
   };
 
   // Guided Add/Edit dialog (#174 A). Owns its field state; the parent reloads after a successful save.
   // Save calls rpc('create') or rpc('update') with the current fingerprint. Saving never trusts or connects.
-  function ServerFormDialog(props: { initial: any; fingerprint: string; original: any; onClose: () => void; onSaved: (d: any) => void; onConflict: (fingerprint?: string) => void }) {
+  function ServerFormDialog(props: {
+    initial: any;
+    fingerprint: string;
+    original: any;
+    onClose: () => void;
+    onSaved: (d: any) => void;
+    onConflict: (fingerprint?: string) => void;
+  }) {
     const [f, setF] = React.useState(props.initial as any);
     const [touched, setTouched] = React.useState({} as Record<string, boolean>);
     const [attempted, setAttempted] = React.useState(false);
@@ -920,67 +1232,185 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     const [confirmDiscard, setConfirmDiscard] = React.useState(false);
     const ref = React.useRef(null as any);
     // The control that opened the dialog gets focus back when the dialog unmounts.
-    const [opener] = React.useState(() => (typeof document !== 'undefined' ? document.activeElement : null) as any);
-    React.useEffect(() => { ref.current?.focus?.(); return () => { try { opener?.focus?.(); } catch { /* opener may be gone */ } }; }, []);
+    const [opener] = React.useState(
+      () =>
+        (typeof document !== 'undefined'
+          ? document.activeElement
+          : null) as any,
+    );
+    React.useEffect(() => {
+      ref.current?.focus?.();
+      return () => {
+        try {
+          opener?.focus?.();
+        } catch {
+          /* opener may be gone */
+        }
+      };
+    }, []);
     const isEdit = f.mode === 'edit';
-    const kept = isEdit ? keptSecrets(props.original) : {} as Record<string, number>;
+    const kept = isEdit
+      ? keptSecrets(props.original)
+      : ({} as Record<string, number>);
     const dirty = JSON.stringify(f) !== JSON.stringify(props.initial);
     const errors = validateForm(f, isEdit ? props.original : undefined);
     if (f.registryReview && /[{}]/.test(f.url)) errors.url = 'errUrlInvalid';
-    if (f.registryReview && f.registryRequiredHeaders?.some((name: string) => !/^\$\{credential:[^}]+\}$/.test(parseKv(f.headers, ':').map[name] || ''))) errors.headers = 'errSecretLiteral';
+    if (
+      f.registryReview &&
+      f.registryRequiredHeaders?.some(
+        (name: string) =>
+          !/^\$\{credential:[^}]+\}$/.test(
+            parseKv(f.headers, ':').map[name] || '',
+          ),
+      )
+    )
+      errors.headers = 'errSecretLiteral';
     const hasErrors = Object.keys(errors).length > 0;
-    const setField = (key: string, value: any) => setF((prev: any) => ({ ...prev, [key]: value }));
-    const touch = (key: string) => setTouched((prev: Record<string, boolean>) => (prev[key] ? prev : { ...prev, [key]: true }));
-    const requestClose = () => { if (dirty) setConfirmDiscard(true); else props.onClose(); };
+    const setField = (key: string, value: any) =>
+      setF((prev: any) => ({ ...prev, [key]: value }));
+    const touch = (key: string) =>
+      setTouched((prev: Record<string, boolean>) =>
+        prev[key] ? prev : { ...prev, [key]: true },
+      );
+    const requestClose = () => {
+      if (dirty) setConfirmDiscard(true);
+      else props.onClose();
+    };
     // Tab cycles inside the dialog so keyboard focus cannot reach the page behind the modal.
-    const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+    const FOCUSABLE =
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
     const trapTab = (event: any) => {
-      const items: any[] = Array.from(ref.current?.querySelectorAll?.(FOCUSABLE) || []);
+      const items: any[] = Array.from(
+        ref.current?.querySelectorAll?.(FOCUSABLE) || [],
+      );
       if (!items.length) return;
       const index = items.indexOf(event.target);
       const wrapBack = event.shiftKey && index <= 0;
-      const wrapForward = !event.shiftKey && (index === -1 || index === items.length - 1);
-      if (wrapBack || wrapForward) { event.preventDefault?.(); (wrapBack ? items[items.length - 1] : items[0]).focus?.(); }
+      const wrapForward =
+        !event.shiftKey && (index === -1 || index === items.length - 1);
+      if (wrapBack || wrapForward) {
+        event.preventDefault?.();
+        (wrapBack ? items[items.length - 1] : items[0]).focus?.();
+      }
     };
     const onKeyDown = (event: any) => {
-      if (event.key === 'Escape') { event.stopPropagation?.(); requestClose(); }
-      else if (event.key === 'Tab') trapTab(event);
+      if (event.key === 'Escape') {
+        event.stopPropagation?.();
+        requestClose();
+      } else if (event.key === 'Tab') trapTab(event);
     };
     // The label wraps only the caption and control, so help and error text are not part of the field's name.
     // Plaintext-secret errors show at once; other errors show after the field is touched or Save is attempted.
     // Saved secrets kept as stored (host-masked): the field is read-only and shows a note instead of [REDACTED].
-    const keptFields: Record<string, number> = { env: kept.env || 0, headers: kept.headers || 0, args: kept.args || 0, url: kept.url || 0, command: kept.command || 0 };
+    const keptFields: Record<string, number> = {
+      env: kept.env || 0,
+      headers: kept.headers || 0,
+      args: kept.args || 0,
+      url: kept.url || 0,
+      command: kept.command || 0,
+    };
     const isKept = (key: string) => (keptFields[key] || 0) > 0;
     const field = (key: string, caption: string, control: any, help?: any) => {
-      const shown = errors[key] && (IMMEDIATE_ERRORS.includes(errors[key]) || touched[key] || attempted) ? withTech(t(errors[key])) : '';
+      const shown =
+        errors[key] &&
+        (IMMEDIATE_ERRORS.includes(errors[key]) || touched[key] || attempted)
+          ? withTech(t(errors[key]))
+          : '';
       const helpId = `waycraft-mcp-${key}-help`;
       const errId = `waycraft-mcp-${key}-error`;
-      const describedBy = [help ? helpId : '', shown ? errId : ''].filter(Boolean).join(' ') || undefined;
-      const note = isKept(key) ? h('span', { className: 'waycraft-mcp-field-help', role: 'status' }, `${keptFields[key]} ${t('keptNote')}`) : null;
-      return h('div', { className: 'waycraft-mcp-field' },
-        h('label', { className: 'waycraft-mcp-field-label' },
+      const describedBy =
+        [help ? helpId : '', shown ? errId : ''].filter(Boolean).join(' ') ||
+        undefined;
+      const note = isKept(key)
+        ? h(
+            'span',
+            { className: 'waycraft-mcp-field-help', role: 'status' },
+            `${keptFields[key]} ${t('keptNote')}`,
+          )
+        : null;
+      return h(
+        'div',
+        { className: 'waycraft-mcp-field' },
+        h(
+          'label',
+          { className: 'waycraft-mcp-field-label' },
           h('span', null, caption),
-          React.cloneElement(control, { 'aria-invalid': shown ? true : undefined, 'aria-describedby': describedBy })),
-        help ? h('span', { id: helpId, className: 'waycraft-mcp-field-help' }, withTech(help)) : null,
+          React.cloneElement(control, {
+            'aria-invalid': shown ? true : undefined,
+            'aria-describedby': describedBy,
+          }),
+        ),
+        help
+          ? h(
+              'span',
+              { id: helpId, className: 'waycraft-mcp-field-help' },
+              withTech(help),
+            )
+          : null,
         note,
-        shown ? h('span', { id: errId, role: 'alert', className: 'waycraft-mcp-field-error' }, shown) : null);
+        shown
+          ? h(
+              'span',
+              {
+                id: errId,
+                role: 'alert',
+                className: 'waycraft-mcp-field-error',
+              },
+              shown,
+            )
+          : null,
+      );
     };
-    const input = (key: string, extra: any = {}) => h('input', { value: f[key], dir: 'ltr', disabled: isKept(key) || undefined, onInput: (e: any) => setField(key, e.target.value), onBlur: () => touch(key), ...extra });
-    const area = (key: string) => h('textarea', { value: f[key], rows: 3, dir: 'ltr', spellCheck: false, disabled: isKept(key) || undefined, onInput: (e: any) => setField(key, e.target.value), onBlur: () => touch(key) });
+    const input = (key: string, extra: any = {}) =>
+      h('input', {
+        value: f[key],
+        dir: 'ltr',
+        disabled: isKept(key) || undefined,
+        onInput: (e: any) => setField(key, e.target.value),
+        onBlur: () => touch(key),
+        ...extra,
+      });
+    const area = (key: string) =>
+      h('textarea', {
+        value: f[key],
+        rows: 3,
+        dir: 'ltr',
+        spellCheck: false,
+        disabled: isKept(key) || undefined,
+        onInput: (e: any) => setField(key, e.target.value),
+        onBlur: () => touch(key),
+      });
     const save = async () => {
       if (saving) return;
       setAttempted(true);
-      if (hasErrors) { setServerError(t('formInvalid')); return; }
+      if (hasErrors) {
+        setServerError(t('formInvalid'));
+        return;
+      }
       const patch = isEdit ? buildPatch(f, props.original) : null;
-      if (patch && !Object.keys(patch).length) { setServerError(t('noChanges')); return; }
+      if (patch && !Object.keys(patch).length) {
+        setServerError(t('noChanges'));
+        return;
+      }
       // Defense in depth: a literal [REDACTED] must never reach the host as a stored value.
       const payload = isEdit ? patch : buildConfig(f);
-      if (JSON.stringify(payload).includes(REDACTED)) { setServerError(t('errRedactedLiteral')); return; }
-      setSaving(true); setServerError('');
+      if (JSON.stringify(payload).includes(REDACTED)) {
+        setServerError(t('errRedactedLiteral'));
+        return;
+      }
+      setSaving(true);
+      setServerError('');
       try {
         const d = isEdit
-          ? await rpc('update', { serverName: props.original.serverName, expectedFingerprint: props.fingerprint, patch })
-          : await rpc('create', { config: buildConfig(f), expectedFingerprint: props.fingerprint });
+          ? await rpc('update', {
+              serverName: props.original.serverName,
+              expectedFingerprint: props.fingerprint,
+              patch,
+            })
+          : await rpc('create', {
+              config: buildConfig(f),
+              expectedFingerprint: props.fingerprint,
+            });
         props.onSaved(d);
       } catch (e: any) {
         setServerError(issueMessage(e));
@@ -989,38 +1419,215 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         setSaving(false);
       }
     };
-    const transportTab = (id: string, label: string) => h('button', { type: 'button', role: 'radio', 'aria-checked': f.transport === id, tabIndex: f.transport === id ? 0 : -1, disabled: isEdit, onClick: () => setField('transport', id) }, label);
+    const transportTab = (id: string, label: string) =>
+      h(
+        'button',
+        {
+          onKeyDown: (e: any) => {
+            if (
+              !isEdit &&
+              ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)
+            ) {
+              e.preventDefault();
+              const next =
+                e.key === 'Home'
+                  ? 'stdio'
+                  : e.key === 'End'
+                    ? 'streamable-http'
+                    : id === 'stdio'
+                      ? 'streamable-http'
+                      : 'stdio';
+              setField('transport', next);
+              e.currentTarget.parentElement
+                ?.querySelectorAll?.('button')
+                ?.[next === 'stdio' ? 0 : 1]?.focus?.();
+            }
+          },
+          type: 'button',
+          role: 'radio',
+          'aria-checked': f.transport === id,
+          tabIndex: f.transport === id ? 0 : -1,
+          disabled: isEdit,
+          onClick: () => setField('transport', id),
+        },
+        label,
+      );
     const stdio = f.transport === 'stdio';
-    const body = h('div', { className: 'waycraft-mcp-dialog-body' },
+    const body = h(
+      'div',
+      { className: 'waycraft-mcp-dialog-body' },
       h('p', { className: 'waycraft-mcp-notice' }, t('formNote')),
-      h('div', { className: 'waycraft-mcp-seg', role: 'radiogroup', 'aria-label': t('transportLabel') },
-        transportTab('stdio', t('transportStdio')), transportTab('streamable-http', t('transportHttp'))),
-      h('div', { className: 'waycraft-mcp-fields' },
-        field('serverName', t('serverName'), input('serverName', { disabled: isEdit, 'aria-readonly': isEdit ? true : undefined, required: true }), isEdit ? t('nameLocked') : t('nameHelp')),
+      h(
+        'div',
+        {
+          className: 'waycraft-mcp-seg',
+          role: 'radiogroup',
+          'aria-label': t('transportLabel'),
+        },
+        transportTab('stdio', t('transportStdio')),
+        transportTab('streamable-http', t('transportHttp')),
+      ),
+      h(
+        'div',
+        { className: 'waycraft-mcp-fields' },
+        field(
+          'serverName',
+          t('serverName'),
+          input('serverName', {
+            disabled: isEdit,
+            'aria-readonly': isEdit ? true : undefined,
+            required: true,
+          }),
+          isEdit ? t('nameLocked') : t('nameHelp'),
+        ),
         ...(stdio
-          ? [field('command', t('command'), input('command', { required: true })),
-             field('args', t('args'), area('args'), t('argsHelp')),
-             field('cwd', t('cwd'), input('cwd')),
-             field('env', t('envLabel'), area('env'), t('envHelp'))]
-          : [field('url', t('url'), input('url', { required: true, type: 'url', inputMode: 'url' })),
-             field('headers', t('headersLabel'), area('headers'), t('headersHelp'))])),
-      h('details', { className: 'waycraft-mcp-advanced', open: !!(errors.startupTimeoutMs || errors.toolCallTimeoutMs) || undefined },
+          ? [
+              field(
+                'command',
+                t('command'),
+                input('command', { required: true }),
+              ),
+              field('args', t('args'), area('args'), t('argsHelp')),
+              field('cwd', t('cwd'), input('cwd')),
+              field('env', t('envLabel'), area('env'), t('envHelp')),
+            ]
+          : [
+              field(
+                'url',
+                t('url'),
+                input('url', { required: true, type: 'url', inputMode: 'url' }),
+              ),
+              field(
+                'headers',
+                t('headersLabel'),
+                area('headers'),
+                t('headersHelp'),
+              ),
+            ]),
+      ),
+      h(
+        'details',
+        {
+          className: 'waycraft-mcp-advanced',
+          open:
+            !!(errors.startupTimeoutMs || errors.toolCallTimeoutMs) ||
+            undefined,
+        },
         h('summary', null, t('advanced')),
-        h('div', { className: 'waycraft-mcp-fields' },
-          field('startupTimeoutMs', t('startupTimeoutMs'), input('startupTimeoutMs', { inputMode: 'numeric' })),
-          field('toolCallTimeoutMs', t('toolCallTimeoutMs'), input('toolCallTimeoutMs', { inputMode: 'numeric' })))),
-      h('div', { className: 'waycraft-mcp-preview' },
+        h(
+          'div',
+          { className: 'waycraft-mcp-fields' },
+          field(
+            'startupTimeoutMs',
+            t('startupTimeoutMs'),
+            input('startupTimeoutMs', { inputMode: 'numeric' }),
+          ),
+          field(
+            'toolCallTimeoutMs',
+            t('toolCallTimeoutMs'),
+            input('toolCallTimeoutMs', { inputMode: 'numeric' }),
+          ),
+        ),
+      ),
+      h(
+        'div',
+        { className: 'waycraft-mcp-preview' },
         h('span', { className: 'waycraft-mcp-meta' }, t('preview')),
-        h('pre', { className: 'waycraft-mcp-pre' }, JSON.stringify(redactForPreview(buildConfig(f)), null, 2))),
-      serverError ? h('p', { role: 'alert', className: 'waycraft-mcp-alert' }, serverError) : null,
-      confirmDiscard ? h(ConfirmDialog, { title: t('dirtyCancel'), message: t('dirtyCancelBody'), confirmLabel: t('discard'), danger: true, onConfirm: props.onClose, onCancel: () => setConfirmDiscard(false) }) : null);
-    const footer = h('div', { className: 'waycraft-mcp-dialog-footer' },
+        h(
+          'pre',
+          { className: 'waycraft-mcp-pre' },
+          JSON.stringify(redactForPreview(buildConfig(f)), null, 2),
+        ),
+      ),
+      serverError
+        ? h(
+            'p',
+            { role: 'alert', className: 'waycraft-mcp-alert' },
+            serverError,
+          )
+        : null,
+      confirmDiscard
+        ? h(ConfirmDialog, {
+            title: t('dirtyCancel'),
+            message: t('dirtyCancelBody'),
+            confirmLabel: t('discard'),
+            danger: true,
+            onConfirm: props.onClose,
+            onCancel: () => setConfirmDiscard(false),
+          })
+        : null,
+    );
+    const footer = h(
+      'div',
+      { className: 'waycraft-mcp-dialog-footer' },
       h('button', { type: 'button', onClick: requestClose }, t('cancel')),
-      h('button', { type: 'button', className: 'waycraft-mcp-primary', disabled: saving, 'aria-disabled': hasErrors ? true : undefined, onClick: () => void save() }, saving ? t('saving') : t('saveServer')));
-    const overlay = h('div', { className: 'waycraft-mcp waycraft-mcp-overlay', dir: isArabic() ? 'rtl' : 'ltr' },
-      h('div', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'waycraft-mcp-dialog-title', className: 'waycraft-mcp-dialog', ref, tabIndex: -1, onKeyDown },
-        h('div', { className: 'waycraft-mcp-dialog-head' }, h('h3', { id: 'waycraft-mcp-dialog-title' }, isEdit ? t('editTitle') : t('addTitle'))),
-        body, footer));
+      h(
+        'button',
+        {
+          type: 'button',
+          className: 'waycraft-mcp-primary',
+          disabled: saving,
+          'aria-disabled': hasErrors ? true : undefined,
+          onClick: () => void save(),
+        },
+        saving ? t('saving') : t('saveServer'),
+      ),
+    );
+    const overlay = h(
+      'div',
+      {
+        className: 'waycraft-mcp waycraft-mcp-overlay',
+        dir: isArabic() ? 'rtl' : 'ltr',
+        onMouseDown: (e: any) => {
+          if (e.target === e.currentTarget) requestClose();
+        },
+      },
+      h(
+        'div',
+        {
+          role: 'dialog',
+          'aria-modal': true,
+          'aria-labelledby': 'waycraft-mcp-dialog-title',
+          className: 'waycraft-mcp-dialog',
+          ref,
+          tabIndex: -1,
+          onKeyDown,
+        },
+        h(
+          'div',
+          { className: 'waycraft-mcp-dialog-head' },
+          h(
+            'h3',
+            { id: 'waycraft-mcp-dialog-title' },
+            isEdit ? t('editTitle') : t('addTitle'),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'waycraft-mcp-icon-btn',
+              'aria-label': t('cancel'),
+              onClick: requestClose,
+            },
+            h(
+              'svg',
+              {
+                width: 16,
+                height: 16,
+                viewBox: '0 0 24 24',
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 1.5,
+                'aria-hidden': true,
+              },
+              h('path', { d: 'M6 6l12 12M18 6L6 18' }),
+            ),
+          ),
+        ),
+        body,
+        footer,
+      ),
+    );
     // Portal to body: the panel's container-type ancestor would otherwise clip the position:fixed overlay.
     const host = portalTarget();
     return host ? host.dom.createPortal(overlay, host.body) : overlay;
@@ -1029,37 +1636,408 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   // Shared modal behaviour: focus in on open, Tab trapped, Escape closes, focus returns to the opener.
   function useModal(onEscape: () => void) {
     const ref = React.useRef(null as any);
-    const [opener] = React.useState(() => (typeof document !== 'undefined' ? document.activeElement : null) as any);
+    const [opener] = React.useState(
+      () =>
+        (typeof document !== 'undefined'
+          ? document.activeElement
+          : null) as any,
+    );
     React.useEffect(() => {
-      const first = ref.current?.querySelector?.('.waycraft-mcp-dialog-footer button:not([disabled])');
+      const first = ref.current?.querySelector?.(
+        '.waycraft-mcp-dialog-footer button:not([disabled])',
+      );
       (first || ref.current)?.focus?.();
-      return () => { try { opener?.focus?.(); } catch { /* opener may be gone */ } };
+      return () => {
+        try {
+          opener?.focus?.();
+        } catch {
+          /* opener may be gone */
+        }
+      };
     }, []);
     const onKeyDown = (event: any) => {
-      if (event.key === 'Escape') { event.stopPropagation?.(); onEscape(); return; }
+      if (event.key === 'Escape') {
+        event.stopPropagation?.();
+        onEscape();
+        return;
+      }
       if (event.key !== 'Tab') return;
-      const items: any[] = Array.from(ref.current?.querySelectorAll?.('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])') || []);
+      const items: any[] = Array.from(
+        ref.current?.querySelectorAll?.(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ) || [],
+      );
       if (!items.length) return;
       const index = items.indexOf(event.target);
       const back = event.shiftKey && index <= 0;
-      const forward = !event.shiftKey && (index === -1 || index === items.length - 1);
-      if (back || forward) { event.preventDefault?.(); (back ? items[items.length - 1] : items[0]).focus?.(); }
+      const forward =
+        !event.shiftKey && (index === -1 || index === items.length - 1);
+      if (back || forward) {
+        event.preventDefault?.();
+        (back ? items[items.length - 1] : items[0]).focus?.();
+      }
     };
     return { ref, onKeyDown };
   }
 
   // A small modal confirmation (same shell as the Add/Edit dialog) for trash, restore, permanent delete and discard.
-  function ConfirmDialog(props: { title: string; message: string; confirmLabel: string; danger?: boolean; busy?: boolean; onConfirm: () => void; onCancel: () => void }) {
+  function ConfirmDialog(props: {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    danger?: boolean;
+    busy?: boolean;
+    onConfirm: () => void;
+    onCancel: () => void;
+  }) {
     const { ref, onKeyDown } = useModal(props.onCancel);
-    const overlay = h('div', { className: 'waycraft-mcp waycraft-mcp-overlay', dir: isArabic() ? 'rtl' : 'ltr', onMouseDown: (e: any) => { if (e.target === e.currentTarget) props.onCancel(); } },
-      h('div', { role: 'alertdialog', 'aria-modal': true, 'aria-labelledby': 'waycraft-mcp-confirm-title', 'aria-describedby': 'waycraft-mcp-confirm-msg', className: 'waycraft-mcp-dialog waycraft-mcp-dialog-sm', ref, tabIndex: -1, onKeyDown },
-        h('div', { className: 'waycraft-mcp-dialog-head' }, h('h3', { id: 'waycraft-mcp-confirm-title' }, props.title)),
-        h('div', { className: 'waycraft-mcp-dialog-body' }, h('p', { id: 'waycraft-mcp-confirm-msg', className: 'waycraft-mcp-confirm-msg' }, props.message)),
-        h('div', { className: 'waycraft-mcp-dialog-footer' },
-          h('button', { type: 'button', disabled: !!props.busy, onClick: props.onCancel }, t('cancel')),
-          h('button', { type: 'button', className: props.danger ? 'waycraft-mcp-danger-solid' : 'waycraft-mcp-primary', disabled: !!props.busy, onClick: props.onConfirm }, props.confirmLabel))));
+    const overlay = h(
+      'div',
+      {
+        className: 'waycraft-mcp waycraft-mcp-overlay',
+        dir: isArabic() ? 'rtl' : 'ltr',
+        onMouseDown: (e: any) => {
+          if (e.target === e.currentTarget) props.onCancel();
+        },
+      },
+      h(
+        'div',
+        {
+          role: 'alertdialog',
+          'aria-modal': true,
+          'aria-labelledby': 'waycraft-mcp-confirm-title',
+          'aria-describedby': 'waycraft-mcp-confirm-msg',
+          className: 'waycraft-mcp-dialog waycraft-mcp-dialog-sm',
+          ref,
+          tabIndex: -1,
+          onKeyDown,
+        },
+        h(
+          'div',
+          { className: 'waycraft-mcp-dialog-head' },
+          h('h3', { id: 'waycraft-mcp-confirm-title' }, props.title),
+        ),
+        h(
+          'div',
+          { className: 'waycraft-mcp-dialog-body' },
+          h(
+            'p',
+            {
+              id: 'waycraft-mcp-confirm-msg',
+              className: 'waycraft-mcp-confirm-msg',
+            },
+            props.message,
+          ),
+        ),
+        h(
+          'div',
+          { className: 'waycraft-mcp-dialog-footer' },
+          h(
+            'button',
+            { type: 'button', disabled: !!props.busy, onClick: props.onCancel },
+            t('cancel'),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: props.danger
+                ? 'waycraft-mcp-danger-solid'
+                : 'waycraft-mcp-primary',
+              disabled: !!props.busy,
+              onClick: props.onConfirm,
+            },
+            props.confirmLabel,
+          ),
+        ),
+      ),
+    );
     const host = portalTarget();
     return host ? host.dom.createPortal(overlay, host.body) : overlay;
+  }
+
+  function ImportDialog(props: {
+    children?: any;
+    suspended?: boolean;
+    onClose: () => void;
+  }) {
+    const { ref, onKeyDown } = useModal(props.onClose);
+    const node = h(
+      'div',
+      {
+        className: 'waycraft-mcp waycraft-mcp-overlay',
+        inert: props.suspended ? true : undefined,
+        'aria-hidden': props.suspended || undefined,
+        dir: isArabic() ? 'rtl' : 'ltr',
+        onMouseDown: (e: any) => {
+          if (e.target === e.currentTarget) props.onClose();
+        },
+      },
+      h(
+        'div',
+        {
+          role: 'dialog',
+          'aria-modal': true,
+          'aria-labelledby': 'waycraft-mcp-import-title',
+          className: 'waycraft-mcp-dialog',
+          ref,
+          tabIndex: -1,
+          onKeyDown,
+        },
+        h(
+          'div',
+          { className: 'waycraft-mcp-dialog-head' },
+          h('h3', { id: 'waycraft-mcp-import-title' }, t('importTitle')),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'waycraft-mcp-icon-btn',
+              'aria-label': t('cancel'),
+              onClick: props.onClose,
+            },
+            '×',
+          ),
+        ),
+        h('div', { className: 'waycraft-mcp-dialog-body' }, props.children),
+      ),
+    );
+    const host = portalTarget();
+    return host ? host.dom.createPortal(node, host.body) : node;
+  }
+
+  function NativeMoreMenu(props: {
+    label: string;
+    disabled?: boolean;
+    children?: any;
+  }) {
+    const [open, setOpen] = React.useState(false);
+    const trigger = React.useRef(null as any);
+    const close = () => {
+      setOpen(false);
+      trigger.current?.focus?.({ preventScroll: true });
+    };
+    const actions = React.Children.toArray(props.children).filter(Boolean);
+    const anchor = tooltip(
+      props.label,
+      h(
+        'button',
+        {
+          ref: trigger,
+          type: 'button',
+          className: 'waycraft-mcp-icon-btn',
+          'aria-label': props.label,
+          'aria-haspopup': 'menu',
+          'aria-expanded': open,
+          disabled: props.disabled,
+          onClick: () => setOpen(!open),
+          onKeyDown: (e: any) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              setOpen(true);
+            }
+          },
+        },
+        h(
+          'svg',
+          {
+            viewBox: '0 0 24 24',
+            width: 16,
+            height: 16,
+            fill: 'currentColor',
+            'aria-hidden': true,
+          },
+          [5, 12, 19].map((x) =>
+            h('circle', { key: x, cx: x, cy: 12, r: 1.5 }),
+          ),
+        ),
+      ),
+    );
+    return h(primitives.Menu, {
+      open,
+      anchor,
+      onClose: close,
+      align: 'end',
+      portal: true,
+      autoFocus: true,
+      items: actions.map((child: any, i: number) => ({
+        id: String(i),
+        label: child.props['aria-label'],
+        icon: child.props.children,
+        disabled: child.props.disabled,
+        danger: String(child.props.className || '').includes('danger'),
+      })),
+      onSelect: (id: string) => {
+        close();
+        actions[Number(id)]?.props.onClick();
+      },
+    });
+  }
+
+  // Compatibility path for hosts predating the public Menu primitive.
+  function MoreMenu(props: {
+    label: string;
+    disabled?: boolean;
+    children?: any;
+  }) {
+    return primitives.Menu
+      ? h(NativeMoreMenu, props)
+      : h(FallbackMoreMenu, props);
+  }
+  function FallbackMoreMenu(props: {
+    label: string;
+    disabled?: boolean;
+    children?: any;
+  }) {
+    const trigger = React.useRef(null as any);
+    const menu = React.useRef(null as any);
+    const [open, setOpen] = React.useState(false);
+    const [pos, setPos] = React.useState({ top: 0, left: 0 });
+    const close = (focus: boolean) => {
+      setOpen(false);
+      if (focus) trigger.current?.focus?.();
+    };
+    React.useEffect(() => {
+      if (!open || typeof document === 'undefined') return;
+      const place = () => {
+        const r = trigger.current?.getBoundingClientRect();
+        const m = menu.current;
+        if (!r || !m) return;
+        const w = document.documentElement.clientWidth,
+          v = document.documentElement.clientHeight;
+        const top =
+          r.bottom + 4 + m.offsetHeight <= v - 8
+            ? r.bottom + 4
+            : r.top - m.offsetHeight - 4;
+        setPos({
+          top: Math.max(8, Math.min(top, v - m.offsetHeight - 8)),
+          left: Math.max(
+            8,
+            Math.min(
+              isArabic() ? r.left : r.right - m.offsetWidth,
+              w - m.offsetWidth - 8,
+            ),
+          ),
+        });
+      };
+      place();
+      menu.current?.querySelector?.('button:not([disabled])')?.focus?.();
+      const away = (e: any) => {
+        if (
+          !menu.current?.contains(e.target) &&
+          !trigger.current?.contains(e.target)
+        )
+          close(false);
+      };
+      document.addEventListener('pointerdown', away, true);
+      document.addEventListener('scroll', place, true);
+      globalThis.addEventListener?.('resize', place);
+      return () => {
+        document.removeEventListener('pointerdown', away, true);
+        document.removeEventListener('scroll', place, true);
+        globalThis.removeEventListener?.('resize', place);
+      };
+    }, [open]);
+    const list = h(
+      'div',
+      {
+        ref: menu,
+        role: 'menu',
+        hidden: !open,
+        className: 'waycraft-mcp waycraft-mcp-menu',
+        dir: isArabic() ? 'rtl' : 'ltr',
+        style: pos,
+        onBlur: (e: any) => {
+          if (
+            e.relatedTarget &&
+            !menu.current?.contains(e.relatedTarget) &&
+            !trigger.current?.contains(e.relatedTarget)
+          )
+            close(false);
+        },
+        onKeyDown: (e: any) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            close(true);
+          }
+          if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+            e.preventDefault();
+            const items: any[] = Array.from(
+              menu.current?.querySelectorAll('button:not([disabled])') || [],
+            );
+            const at = items.indexOf(document.activeElement);
+            const i =
+              e.key === 'Home'
+                ? 0
+                : e.key === 'End'
+                  ? items.length - 1
+                  : (at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) %
+                    items.length;
+            items[i]?.focus();
+          }
+        },
+      },
+      React.Children.map(props.children, (child: any) =>
+        child
+          ? React.cloneElement(
+              child,
+              {
+                role: 'menuitem',
+                onClick: () => {
+                  close(true);
+                  child.props.onClick();
+                },
+              },
+              child.props.children,
+              child.props['aria-label'],
+            )
+          : null,
+      ),
+    );
+    const host = portalTarget();
+    return h(
+      React.Fragment,
+      null,
+      h(
+        'button',
+        {
+          ref: trigger,
+          type: 'button',
+          className: 'waycraft-mcp-icon-btn',
+          'aria-label': props.label,
+          title: props.label,
+          'aria-haspopup': 'menu',
+          'aria-expanded': open,
+          disabled: props.disabled,
+          onClick: () => setOpen(!open),
+          onKeyDown: (e: any) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              setOpen(true);
+            }
+          },
+        },
+        h(
+          'svg',
+          {
+            viewBox: '0 0 24 24',
+            width: 16,
+            height: 16,
+            fill: 'currentColor',
+            'aria-hidden': true,
+          },
+          [5, 12, 19].map((x) =>
+            h('circle', { key: x, cx: x, cy: 12, r: 1.5 }),
+          ),
+        ),
+      ),
+      open || !host
+        ? host
+          ? host.dom.createPortal(list, host.body)
+          : list
+        : null,
+    );
   }
 
   // Transient feedback: successes and warnings clear themselves; errors stay until dismissed.
@@ -1071,15 +2049,98 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       return () => clearTimeout(id);
     }, [notice]);
     if (!notice) return null;
-    const kind = notice.kind === 'err' ? 'err' : notice.kind === 'warn' ? 'warn' : 'ok';
-    const glyph = kind === 'ok'
-      ? h('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' }, h('path', { d: 'M5 12.5l4.5 4.5L19 7.5' }))
-      : h('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' }, h('path', { d: 'M12 8v5M12 16.5v.01' }), h('circle', { cx: 12, cy: 12, r: 9 }));
-    const node = h('div', { className: 'waycraft-mcp waycraft-mcp-toasts', dir: isArabic() ? 'rtl' : 'ltr' },
-      h('div', { role: kind === 'err' ? 'alert' : 'status', className: `waycraft-mcp-toast waycraft-mcp-toast-${kind}${kind === 'warn' ? ' waycraft-mcp-alert-warn' : ''}` },
+    if (primitives.Toast && notice.kind !== 'err')
+      return h(primitives.Toast, {
+        text: notice.text,
+        tone: notice.kind === 'warn' ? undefined : 'success',
+        holdMs: notice.kind === 'warn' ? 9000 : 5000,
+        onDone: onDismiss,
+      });
+    const kind =
+      notice.kind === 'err' ? 'err' : notice.kind === 'warn' ? 'warn' : 'ok';
+    const glyph =
+      kind === 'ok'
+        ? h(
+            'svg',
+            {
+              viewBox: '0 0 24 24',
+              width: 16,
+              height: 16,
+              fill: 'none',
+              stroke: 'currentColor',
+              strokeWidth: 2,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+              'aria-hidden': 'true',
+            },
+            h('path', { d: 'M5 12.5l4.5 4.5L19 7.5' }),
+          )
+        : h(
+            'svg',
+            {
+              viewBox: '0 0 24 24',
+              width: 16,
+              height: 16,
+              fill: 'none',
+              stroke: 'currentColor',
+              strokeWidth: 2,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+              'aria-hidden': 'true',
+            },
+            h('path', { d: 'M12 8v5M12 16.5v.01' }),
+            h('circle', { cx: 12, cy: 12, r: 9 }),
+          );
+    const node = h(
+      'div',
+      {
+        className: 'waycraft-mcp waycraft-mcp-toasts',
+        dir: isArabic() ? 'rtl' : 'ltr',
+      },
+      h(
+        'div',
+        {
+          role: kind === 'err' ? 'alert' : 'status',
+          className: `waycraft-mcp-toast waycraft-mcp-toast-${kind}${kind === 'warn' ? ' waycraft-mcp-alert-warn' : ''}`,
+        },
         h('span', { className: 'waycraft-mcp-toast-icon' }, glyph),
-        h('span', { className: 'waycraft-mcp-toast-text' }, notice.text, notice.code ? h('bdi', { dir: 'ltr', className: 'waycraft-mcp-toast-code' }, ` (${notice.code})`) : null),
-        h('button', { type: 'button', className: 'waycraft-mcp-icon-btn', 'aria-label': t('dismiss'), onClick: onDismiss }, h('svg', { viewBox: '0 0 24 24', width: 14, height: 14, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', 'aria-hidden': 'true' }, h('path', { d: 'M6 6l12 12M18 6L6 18' })))));
+        h(
+          'span',
+          { className: 'waycraft-mcp-toast-text' },
+          notice.text,
+          notice.code
+            ? h(
+                'bdi',
+                { dir: 'ltr', className: 'waycraft-mcp-toast-code' },
+                ` (${notice.code})`,
+              )
+            : null,
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'waycraft-mcp-icon-btn',
+            'aria-label': t('dismiss'),
+            onClick: onDismiss,
+          },
+          h(
+            'svg',
+            {
+              viewBox: '0 0 24 24',
+              width: 14,
+              height: 14,
+              fill: 'none',
+              stroke: 'currentColor',
+              strokeWidth: 2,
+              strokeLinecap: 'round',
+              'aria-hidden': 'true',
+            },
+            h('path', { d: 'M6 6l12 12M18 6L6 18' }),
+          ),
+        ),
+      ),
+    );
     const host = portalTarget();
     return host ? host.dom.createPortal(node, host.body) : node;
   }
@@ -1094,12 +2155,12 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     const [fStatus, setFStatus] = React.useState('all');
     const [fTrust, setFTrust] = React.useState('all');
     const [query, setQuery] = React.useState('');
-    const [selected, setSelected] = React.useState(null as string|null);
+    const [selected, setSelected] = React.useState(null as string | null);
     const [tab, setTab] = React.useState('overview');
     const [busy, setBusy] = React.useState('');
     const [notice, setNotice] = React.useState(null as any);
     const [confirm, setConfirmState] = React.useState(null as any);
-    const [toolCache, setToolCache] = React.useState({} as Record<string,any>);
+    const [toolCache, setToolCache] = React.useState({} as Record<string, any>);
     // #175 discovery/import (candidates only, explicit approval, no auto-activation)
     const [discoverRoots, setDiscoverRoots] = React.useState('');
     const [discovery, setDiscovery] = React.useState(null as any);
@@ -1112,360 +2173,1805 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     const registryPageQuery = React.useRef('');
     const registryCursors = React.useRef(new Set<string>());
     const registryAbort = React.useRef(null as AbortController | null);
-    React.useEffect(() => () => { registryGeneration.current++; registryAbort.current?.abort(); }, []);
+    React.useEffect(
+      () => () => {
+        registryGeneration.current++;
+        registryAbort.current?.abort();
+      },
+      [],
+    );
     const searchRegistry = async (cursor?: string) => {
       registryAbort.current?.abort();
-      const controller = new AbortController(); registryAbort.current = controller;
+      const controller = new AbortController();
+      registryAbort.current = controller;
       const generation = ++registryGeneration.current;
-      setRegistryBusy(true); setRegistryError(''); setRegistryDetail('');
-      if (!cursor) { registryPageQuery.current = registryQuery; registryCursors.current = new Set(); }
+      setRegistryBusy(true);
+      setRegistryError('');
+      setRegistryDetail('');
+      if (!cursor) {
+        registryPageQuery.current = registryQuery;
+        registryCursors.current = new Set();
+      }
       if (cursor) registryCursors.current.add(cursor);
       try {
-        const data = await rpc('registry_search', { query: registryPageQuery.current, ...(cursor ? { cursor } : {}), limit: 20 }, controller.signal);
+        const data = await rpc(
+          'registry_search',
+          {
+            query: registryPageQuery.current,
+            ...(cursor ? { cursor } : {}),
+            limit: 20,
+          },
+          controller.signal,
+        );
         if (generation !== registryGeneration.current) return;
         const page = data.registry;
-        setRegistry({ ...page, nextCursor: registryCursors.current.has(page.nextCursor) ? undefined : page.nextCursor });
+        setRegistry({
+          ...page,
+          nextCursor: registryCursors.current.has(page.nextCursor)
+            ? undefined
+            : page.nextCursor,
+        });
       } catch (error: any) {
-        if (generation === registryGeneration.current) { setRegistry(null); setRegistryError(error?.message || t('error')); }
-      } finally { if (generation === registryGeneration.current) setRegistryBusy(false); }
+        if (generation === registryGeneration.current) {
+          setRegistry(null);
+          setRegistryError(error?.message || t('error'));
+        }
+      } finally {
+        if (generation === registryGeneration.current) setRegistryBusy(false);
+      }
     };
     const [importText, setImportText] = React.useState('');
+    const [importOpen, setImportOpen] = React.useState(false);
+    const [importFileName, setImportFileName] = React.useState('');
+    const importRead = React.useRef(0);
+    const toolsReadGeneration = React.useRef(0);
+    const [importReading, setImportReading] = React.useState(false);
+    const [toolsRetry, setToolsRetry] = React.useState(0);
+    const [toolsRead, setToolsRead] = React.useState({
+      key: '',
+      loading: false,
+      error: false,
+    });
     const [importPreview, setImportPreview] = React.useState(null as any);
-    const [importApprovals, setImportApprovals] = React.useState({} as Record<string,{approved:boolean,onConflict:'skip'|'replace'}>);
+    const [importApprovals, setImportApprovals] = React.useState(
+      {} as Record<
+        string,
+        { approved: boolean; onConflict: 'skip' | 'replace' }
+      >,
+    );
     const [importResult, setImportResult] = React.useState(null as any);
     // Guided Add/Edit form (#174 A). Null when closed; values are edited locally until Save.
     const [form, setForm] = React.useState(null as any);
-    // Last explicit connection test per server, this session only (#174 B). Cleared when the config is saved.
-    const [testResults, setTestResults] = React.useState({} as Record<string, { ok: boolean; message: string }>);
+    // Last recorded connection check, restored from the host without opening a connection.
+    const [testResults, setTestResults] = React.useState(
+      {} as Record<
+        string,
+        { ok: boolean; message: string; config: string; checkedAt?: string }
+      >,
+    );
     const alive = React.useRef(true);
 
     // Functional updater: a reload keeps a ready panel mounted, so an open form dialog is not unmounted.
     const load = React.useCallback(async () => {
-      setState((prev: any) => (prev.kind === 'ready' ? prev : { kind: 'loading' }));
+      setState((prev: any) =>
+        prev.kind === 'ready' ? prev : { kind: 'loading' },
+      );
       setNotice(null);
       try {
         const data = await rpc('list');
         if (!alive.current) return;
-        setServers(Array.isArray(data.servers) ? data.servers : []);
-        setTrashed(Array.isArray(data.trashedServers) ? data.trashedServers : []);
+        const loadedServers = Array.isArray(data.servers) ? data.servers : [];
+        setServers(loadedServers);
+        setTestResults((previous: any) => {
+          const results: Record<string, any> = {};
+          for (const server of loadedServers) {
+            const config = configIdentity(server);
+            const check = data.connectionChecks?.[server.serverName];
+            if (
+              check &&
+              typeof check.ok === 'boolean' &&
+              check.configFingerprint === config &&
+              typeof check.checkedAt === 'string' &&
+              Number.isFinite(Date.parse(check.checkedAt))
+            ) {
+              results[server.serverName] = {
+                ok: check.ok,
+                message: '',
+                config,
+                checkedAt: check.checkedAt,
+              };
+            } else if (
+              !data.connectionChecks &&
+              previous[server.serverName]?.config === config
+            ) {
+              // Compatibility with an older host during a client-only reload.
+              results[server.serverName] = previous[server.serverName];
+            }
+          }
+          return results;
+        });
+        setTrashed(
+          Array.isArray(data.trashedServers) ? data.trashedServers : [],
+        );
         setFingerprint(data.fingerprint || '');
         setState({ kind: 'ready' });
       } catch (e: any) {
         if (!alive.current) return;
-        if (e?.code === 'unauthorized' || e?.status === 401 || e?.status === 403) setState({ kind: 'unauthorized' });
+        if (
+          e?.code === 'unauthorized' ||
+          e?.status === 401 ||
+          e?.status === 403
+        )
+          setState({ kind: 'unauthorized' });
         else setState({ kind: 'error', message: e?.message || '' });
       }
     }, []);
 
-    React.useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [load]);
+    React.useEffect(() => {
+      alive.current = true;
+      void load();
+      return () => {
+        alive.current = false;
+      };
+    }, [load]);
 
     // load() clears the notice, so the outcome notice is set after the reload. `after` may return a custom notice.
-    const run = async (label: string, fn: () => Promise<any>, after?: (d:any)=>any) => {
-      setBusy(label); setNotice(null);
+    const run = async (
+      label: string,
+      fn: () => Promise<any>,
+      after?: (d: any) => any,
+    ) => {
+      setBusy(label);
+      setNotice(null);
       try {
-        const d = await fn(); if (!alive.current) return;
+        const d = await fn();
+        if (!alive.current) return;
         const custom = after?.(d);
         await load();
-        if (alive.current) setNotice(custom || { kind: 'ok', text: t('opSuccess') });
-      }
-      catch (e: any) {
+        if (alive.current)
+          setNotice(custom || { kind: 'ok', text: t('opSuccess') });
+      } catch (e: any) {
         if (!alive.current) return;
         const preview = e?.data?.preview;
         if (preview) setImportPreview(preview);
         const issue = preview?.issues?.[0]?.message;
-        setNotice({ kind: 'err', text: issue ? `${e?.message || t('opFailed')}: ${issue}` : (e?.message || t('opFailed')), code: e?.code || (e?.status ? `HTTP ${e.status}` : undefined) });
+        setNotice({
+          kind: 'err',
+          text: issue
+            ? `${e?.message || t('opFailed')}: ${issue}`
+            : e?.message || t('opFailed'),
+          code: e?.code || (e?.status ? `HTTP ${e.status}` : undefined),
+        });
+      } finally {
+        if (alive.current) setBusy('');
       }
-      finally { if (alive.current) setBusy(''); }
     };
 
     const matches = (s: any) => {
       const q = query.trim().toLowerCase();
-      if (q && !String(s.serverName||'').toLowerCase().includes(q)) return false;
-      if (fTransport !== 'all' && String(s.config?.transport || '') !== fTransport) return false;
+      if (
+        q &&
+        !String(s.serverName || '')
+          .toLowerCase()
+          .includes(q)
+      )
+        return false;
+      if (
+        fTransport !== 'all' &&
+        String(s.config?.transport || '') !== fTransport
+      )
+        return false;
       if (fStatus === 'enabled' && s.disabled) return false;
       if (fStatus === 'off' && !s.disabled) return false;
-      const needs = ['untrusted','invalidated'].includes(trustOf(s.trust));
+      const needs = ['untrusted', 'invalidated'].includes(trustOf(s.trust));
       if (fTrust === 'trusted' && needs) return false;
       if (fTrust === 'needsTrust' && !needs) return false;
       return true;
     };
     const visibleServers = servers.filter(matches);
-    const current = servers.find((s:any)=>s.serverName===selected) || visibleServers[0] || trashed.find((s:any)=>s.serverName===selected) || null;
+    const current =
+      servers.find((s: any) => s.serverName === selected) ||
+      visibleServers[0] ||
+      trashed.find((s: any) => s.serverName === selected) ||
+      null;
 
-    if (state.kind === 'loading') return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr' }, h('style', null, STYLE), h('p', { role: 'status' }, t('loading')));
-    if (state.kind === 'unauthorized') return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr' }, h('style', null, STYLE), h('p', { role: 'alert' }, t('unauthorized')));
-    if (state.kind === 'error') return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr' }, h('style', null, STYLE), h('p', { role: 'alert' }, t('error')), h('p', { className: 'waycraft-mcp-note' }, ltr(state.message||'')), h('button', { type: 'button', onClick: load }, t('retry')));
+    const toolsKey = current
+      ? `${current.serverName}:${configIdentity(current)}`
+      : '';
+    React.useEffect(() => {
+      if (
+        state.kind !== 'ready' ||
+        area !== 'servers' ||
+        tab !== 'tools' ||
+        !current ||
+        current.trash?.trashed
+      )
+        return;
+      let cancelled = false;
+      const generation = ++toolsReadGeneration.current;
+      const name = current.serverName;
+      setToolsRead({ key: toolsKey, loading: true, error: false });
+      setToolCache((previous: any) => {
+        const next = { ...previous };
+        delete next[name];
+        return next;
+      });
+      void rpc('list_tools', { serverName: name }).then(
+        (data: any) => {
+          if (cancelled || generation !== toolsReadGeneration.current) return;
+          setToolCache((previous: any) => ({ ...previous, [name]: data }));
+          setToolsRead({ key: toolsKey, loading: false, error: false });
+        },
+        () => {
+          if (!cancelled && generation === toolsReadGeneration.current)
+            setToolsRead({ key: toolsKey, loading: false, error: true });
+        },
+      );
+      return () => {
+        cancelled = true;
+      };
+    }, [state.kind, area, tab, toolsKey, toolsRetry]);
 
-    const confirmUi = confirm ? h(ConfirmDialog, { title: confirm.title || t('confirm'), message: confirm.label, confirmLabel: confirm.confirmLabel || t('confirm'), danger: !!confirm.danger, busy: !!busy,
-      onCancel: () => setConfirmState(null), onConfirm: () => { const c = confirm; setConfirmState(null); void run(c.label, c.fn, c.success ? () => ({ kind: 'ok', text: c.success }) : undefined); } }) : null;
+    const changeImport = (text: string) => {
+      importRead.current++;
+      setImportReading(false);
+      setImportText(text);
+      setImportPreview(null);
+      setImportApprovals({});
+      setImportResult(null);
+      setImportFileName('');
+    };
+    const readImportFiles = async (files: any) => {
+      const ticket = ++importRead.current;
+      setImportReading(false);
+      setImportText('');
+      setImportPreview(null);
+      setImportApprovals({});
+      setImportResult(null);
+      setImportFileName('');
+      const file = files?.[0];
+      if (
+        files?.length !== 1 ||
+        !file ||
+        !/\.json$/i.test(file.name || '') ||
+        file.size > 24 * 1024
+      ) {
+        setNotice({ kind: 'err', text: t('importFileError') });
+        return;
+      }
+      setImportReading(true);
+      try {
+        const text = await file.text();
+        if (!alive.current || ticket !== importRead.current) return;
+        if (new TextEncoder().encode(text).length > 24 * 1024)
+          throw new Error(t('importFileError'));
+        JSON.parse(text);
+        setImportText(text);
+        setImportFileName(file.name);
+        setNotice(null);
+      } catch {
+        if (alive.current && ticket === importRead.current)
+          setNotice({ kind: 'err', text: t('importFileError') });
+      } finally {
+        if (alive.current && ticket === importRead.current)
+          setImportReading(false);
+      }
+    };
+    const closeImport = () => {
+      if (busy) return;
+      const close = () => {
+        importRead.current++;
+        setImportOpen(false);
+        changeImport('');
+      };
+      if (importText || importPreview)
+        setConfirmState({
+          title: t('importTitle'),
+          label: t('importDiscard'),
+          fn: async () => {
+            close();
+            return {};
+          },
+        });
+      else close();
+    };
 
-    const renderCandidate = (c:any, key:string) => h('li', { key, className: 'waycraft-mcp-panel' },
-      h('div', { className: 'waycraft-mcp-row' },
-        h('strong', null, ltr(c.serverName)),
-        h('span', { className: 'waycraft-mcp-meta' }, c.valid ? t('importValid') : t('importInvalid'), c.conflict ? ` · ${t('importConflict')}` : '', c.credentialRefs?.length ? ` · ${t('importCredRefs')}: ${c.credentialRefs.length}` : '')),
-      c.conflict ? h('p', { className: 'waycraft-mcp-note', role: 'status' }, c.conflict.message || t('importConflict')) : null,
-      c.scopeNote ? h('p', { className: 'waycraft-mcp-note' }, c.scopeNote) : null,
-      c.issues?.length ? h('p', { className: 'waycraft-mcp-note', role: 'status' }, c.issues.map((i:any)=>i.message||i.code).join('; ')) : null,
-      h('label', { style: { display:'flex', gap:'8px', alignItems:'center' } },
-        h('input', { type: 'checkbox', checked: !!importApprovals[c.serverName]?.approved, disabled: !c.valid, onChange: (e:any)=>setImportApprovals((m:any)=>({ ...m, [c.serverName]: { approved: e.target.checked, onConflict: m[c.serverName]?.onConflict || 'skip' } })) }),
-        t('importSelect')),
-      c.conflict?.kind === 'duplicate_existing' ? h('select', { 'aria-label': t('importConflict'), value: importApprovals[c.serverName]?.onConflict || 'skip', onChange: (e:any)=>setImportApprovals((m:any)=>({ ...m, [c.serverName]: { approved: !!m[c.serverName]?.approved, onConflict: e.target.value } })) },
-        h('option', { value: 'skip' }, t('importConflictSkip')), h('option', { value: 'replace' }, t('importConflictReplace'))) : null,
-      h('pre', { className: 'waycraft-mcp-pre' }, JSON.stringify(c.config||{}, null, 2))
-    );
+    if (state.kind === 'loading')
+      return h(
+        'div',
+        { className: 'waycraft-mcp', dir: isArabic() ? 'rtl' : 'ltr' },
+        h('style', null, STYLE),
+        h('p', { role: 'status' }, t('loading')),
+      );
+    if (state.kind === 'unauthorized')
+      return h(
+        'div',
+        { className: 'waycraft-mcp', dir: isArabic() ? 'rtl' : 'ltr' },
+        h('style', null, STYLE),
+        h('p', { role: 'alert' }, t('unauthorized')),
+      );
+    if (state.kind === 'error')
+      return h(
+        'div',
+        { className: 'waycraft-mcp', dir: isArabic() ? 'rtl' : 'ltr' },
+        h('style', null, STYLE),
+        h('p', { role: 'alert' }, t('error')),
+        h('p', { className: 'waycraft-mcp-note' }, ltr(state.message || '')),
+        h('button', { type: 'button', onClick: load }, t('retry')),
+      );
 
-    const registryArea = h('section', { 'aria-label': t('registryTitle'), className: 'waycraft-mcp-stack' },
+    const confirmUi = confirm
+      ? h(ConfirmDialog, {
+          title: confirm.title || t('confirm'),
+          message: confirm.label,
+          confirmLabel: confirm.confirmLabel || t('confirm'),
+          danger: !!confirm.danger,
+          busy: !!busy,
+          onCancel: () => setConfirmState(null),
+          onConfirm: () => {
+            const c = confirm;
+            setConfirmState(null);
+            void run(
+              c.label,
+              c.fn,
+              c.success ? () => ({ kind: 'ok', text: c.success }) : undefined,
+            );
+          },
+        })
+      : null;
+
+    const renderCandidate = (c: any, key: string) =>
+      h(
+        'li',
+        { key, className: 'waycraft-mcp-panel' },
+        h(
+          'div',
+          { className: 'waycraft-mcp-row' },
+          h('strong', null, ltr(c.serverName)),
+          h(
+            'span',
+            { className: 'waycraft-mcp-meta' },
+            c.valid ? t('importValid') : t('importInvalid'),
+            c.conflict ? ` · ${t('importConflict')}` : '',
+            c.credentialRefs?.length
+              ? ` · ${t('importCredRefs')}: ${c.credentialRefs.length}`
+              : '',
+          ),
+        ),
+        c.conflict
+          ? h(
+              'p',
+              { className: 'waycraft-mcp-note', role: 'status' },
+              c.conflict.message || t('importConflict'),
+            )
+          : null,
+        c.scopeNote
+          ? h('p', { className: 'waycraft-mcp-note' }, c.scopeNote)
+          : null,
+        c.issues?.length
+          ? h(
+              'p',
+              { className: 'waycraft-mcp-note', role: 'status' },
+              c.issues.map((i: any) => i.message || i.code).join('; '),
+            )
+          : null,
+        h(
+          'label',
+          { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+          h('input', {
+            type: 'checkbox',
+            checked: !!importApprovals[c.serverName]?.approved,
+            disabled: !c.valid,
+            onChange: (e: any) =>
+              setImportApprovals((m: any) => ({
+                ...m,
+                [c.serverName]: {
+                  approved: e.target.checked,
+                  onConflict: m[c.serverName]?.onConflict || 'skip',
+                },
+              })),
+          }),
+          t('importSelect'),
+        ),
+        c.conflict?.kind === 'duplicate_existing'
+          ? h(
+              'select',
+              {
+                'aria-label': t('importConflict'),
+                value: importApprovals[c.serverName]?.onConflict || 'skip',
+                onChange: (e: any) =>
+                  setImportApprovals((m: any) => ({
+                    ...m,
+                    [c.serverName]: {
+                      approved: !!m[c.serverName]?.approved,
+                      onConflict: e.target.value,
+                    },
+                  })),
+              },
+              h('option', { value: 'skip' }, t('importConflictSkip')),
+              h('option', { value: 'replace' }, t('importConflictReplace')),
+            )
+          : null,
+        h(
+          'pre',
+          { className: 'waycraft-mcp-pre' },
+          JSON.stringify(c.config || {}, null, 2),
+        ),
+      );
+
+    const registryArea = h(
+      'section',
+      { 'aria-label': t('registryTitle'), className: 'waycraft-mcp-stack' },
       h('strong', null, t('registryTitle')),
       h('p', { className: 'waycraft-mcp-note' }, t('registryNote')),
-      h('form', { className: 'waycraft-mcp-row', onSubmit: (event: any) => { event.preventDefault(); void searchRegistry(); } },
-        h('input', { 'aria-label': t('registryQuery'), placeholder: t('registryQuery'), maxLength: 200, value: registryQuery, onInput: (event: any) => { registryGeneration.current++; registryAbort.current?.abort(); setRegistryBusy(false); setRegistry(null); setRegistryQuery(event.target.value); } }),
-        h('button', { type: 'submit', disabled: registryBusy, onClick: (event: any) => { event.preventDefault(); void searchRegistry(); } }, t('registrySearch'))),
-      registryBusy ? h('p', { role: 'status' }, t('loading')) : null,
-      registryError ? h('div', { role: 'alert' }, registryError, h('button', { type: 'button', onClick: () => void searchRegistry() }, t('retry'))) : null,
-      registry && !registryBusy ? h('div', null,
-        !registry.servers?.length ? h('p', { role: 'status' }, t('registryEmpty')) : null,
-        ...(registry.servers || []).map((server: any) => {
-          const identity = `${server.name}@${server.version}`;
-          const remotes = (server.remotes || []).filter((remote: any) => remote.type === 'streamable-http' && /^https?:\/\//i.test(remote.url));
-          return h('article', { key: identity, className: 'waycraft-mcp-panel', style: { borderBlockEnd: '1px solid var(--dsw-alias-border-l3)', paddingBlock: '12px' } },
-            h('div', { className: 'waycraft-mcp-row' }, h('strong', null, ltr(server.name)), h('span', { className: 'waycraft-mcp-meta' }, ltr(server.version)),
-              h('button', { type: 'button', 'aria-expanded': registryDetail === identity, onClick: () => setRegistryDetail(registryDetail === identity ? '' : identity) }, t('registryDetails'))),
-            h('p', { className: 'waycraft-mcp-note', dir: 'auto' }, server.description),
-            registryDetail === identity ? h('div', { className: 'waycraft-mcp-stack' },
-              h('span', { className: 'waycraft-mcp-meta' }, t('registryTitle')),
-              !remotes.length ? h('p', null, t('registryManual')) : h('p', { className: 'waycraft-mcp-note' }, t('registryHeaders')),
-              ...remotes.map((remote: any, index: number) => h('div', { key: index, className: 'waycraft-mcp-row' }, ltr(remote.url),
-                h('button', { type: 'button', onClick: () => setForm({ key: `registry-${identity}-${index}`, original: null, initial: emptyForm({ transport: 'streamable-http', serverName: server.name.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 64), url: remote.url, registryReview: true, registryRequiredHeaders: remote.headers.filter((header: any) => header.required).map((header: any) => header.name), headers: remote.headers.filter((header: any) => header.required).map((header: any) => `${header.name}: `).join('\n') }) }) }, t('registryReview'))))
-            ) : null);
+      h(
+        'form',
+        {
+          className: 'waycraft-mcp-row',
+          onSubmit: (event: any) => {
+            event.preventDefault();
+            void searchRegistry();
+          },
+        },
+        h('input', {
+          'aria-label': t('registryQuery'),
+          placeholder: t('registryQuery'),
+          maxLength: 200,
+          value: registryQuery,
+          onInput: (event: any) => {
+            registryGeneration.current++;
+            registryAbort.current?.abort();
+            setRegistryBusy(false);
+            setRegistry(null);
+            setRegistryQuery(event.target.value);
+          },
         }),
-        registry.nextCursor ? h('button', { type: 'button', disabled: registryBusy, onClick: () => void searchRegistry(registry.nextCursor) }, t('registryNext')) : null) : null);
-
-    const discoveryArea = h('section', { 'aria-label': t('discoverTitle'), className: 'waycraft-mcp-card' },
-      h('div', { className: 'waycraft-mcp-card-body' },
-        h('strong', null, t('discoverTitle')),
-        h('p', { className: 'waycraft-mcp-note' }, t('discoverNote'), ' ', t('discoverCandidatesNote')),
-        h('label', null, t('discoverRoots'), h('textarea', { value: discoverRoots, onInput: (e:any)=>setDiscoverRoots(e.target.value), rows: 3, spellCheck: false, className: 'waycraft-mcp-mono' })),
-        h('div', { className: 'waycraft-mcp-row' },
-          h('button', { type: 'button', disabled: !!busy, onClick: () => void run('discover', async () => {
-            const roots = discoverRoots.split(/\n+/).map((s:string)=>s.trim()).filter(Boolean);
-            if (!roots.length) throw new Error(t('discoverRoots'));
-            const d = await rpc('discover', { roots });
-            setDiscovery(d.discovery || d);
-            return d;
-          }) }, t('discoverScan'))),
-      ),
-      discovery ? h('div', { className: 'waycraft-mcp-card' },
-        h('div', { className: 'waycraft-mcp-card-body' },
-          h('p', { className: 'waycraft-mcp-meta' }, t('discoverCandidate'), ': ', String(discovery.stats?.candidates||0), ' · ', t('discoverMalformed'), ': ', String(discovery.stats?.malformed||0), ' · ', t('discoverOversized'), ': ', String(discovery.stats?.oversized||0)),
-          (discovery.files||[]).length ? (discovery.files||[]).map((f:any,i:number)=>h('article', { key: f.path||i, className: 'waycraft-mcp-card' },
-            h('div', { className: 'waycraft-mcp-card-body' },
-              h('div', { className: 'waycraft-mcp-row' }, h('strong', null, ltr(f.relativePath||f.path||'')), h('span', { className: 'waycraft-mcp-meta' }, f.status)),
-              f.message ? h('p', { className: 'waycraft-mcp-notice' }, f.message) : null,
-              f.preview?.candidates?.length ? h('ul', { className: 'waycraft-mcp-list' }, f.preview.candidates.map((c:any,j:number)=>renderCandidate(c, `${f.path}:${j}`))) : null
-            )
-          )) : h('p', { className: 'waycraft-mcp-note' }, t('discoverEmpty'))
-        )
-      ) : h('p', { className: 'waycraft-mcp-note' }, t('discoverEmpty'))
-    );
-
-    const importArea = h('section', { 'aria-label': t('importTitle'), className: 'waycraft-mcp-card' },
-      h('div', { className: 'waycraft-mcp-card-body' },
-        h('strong', null, t('importTitle')),
-        h('p', { className: 'waycraft-mcp-note' }, t('importNote')),
-        h('label', null, t('importJson'), h('textarea', { value: importText, onInput: (e:any)=>{ setImportText(e.target.value); setImportPreview(null); setImportResult(null); }, rows: 6, spellCheck: false, className: 'waycraft-mcp-mono' })),
-        h('div', { className: 'waycraft-mcp-row' },
-          h('button', { type: 'button', disabled: !!busy, onClick: () => void run('import-preview', async () => {
-            let input:any = importText;
-            try { input = JSON.parse(importText); } catch {}
-            const d = await rpc('import_preview', { input });
-            setImportPreview(d.preview || d);
-            setImportApprovals({});
-            setImportResult(null);
-            return d;
-          }) }, t('importPreview')),
-          h('button', { type: 'button', className: 'waycraft-mcp-primary', disabled: !!busy || !importPreview?.ok, onClick: () => void run('import-register', async () => {
-            const approvals = Object.entries(importApprovals).filter(([,v]:any)=>v?.approved).map(([serverName,v]:any)=>({ serverName, approved: true, onConflict: v.onConflict || 'skip' }));
-            if (!approvals.length) throw new Error(t('importNoPreview'));
-            // 207 means a partial import: rpc() throws on ok:false, but the body still carries the per-candidate stats.
-            let d: any;
-            try { d = await rpc('import_register', { preview: importPreview, approvals }); }
-            catch (e: any) { if (!e?.data?.import) throw e; d = e.data; }
-            setImportResult(d.import || d);
-            setImportPreview(null); setImportApprovals({});
-            return d;
-          }, (d: any) => {
-            // Partial registration (207 or any rejected/failed/skipped candidate): warn instead of the generic success.
-            const stats = (d.import || d).stats || {};
-            const partial = ['rejected', 'failed', 'skipped'].some((k) => Number(stats[k]) > 0);
-            return partial ? { kind: 'warn', text: t('importPartialWarning') } : undefined;
-          }) }, t('importApproveRegister'))),
-      ),
-      !importPreview ? h('p', { className: 'waycraft-mcp-notice' }, t('importNoPreview')) : h('div', { className: 'waycraft-mcp-card' },
-        h('div', { className: 'waycraft-mcp-card-body' },
-          h('p', { className: 'waycraft-mcp-meta' }, t('importValid'), ': ', String(importPreview.stats?.valid||0), ' · ', t('importInvalid'), ': ', String(importPreview.stats?.invalid||0), ' · ', t('importConflict'), ': ', String(importPreview.stats?.conflicts||0)),
-          importPreview.scope?.note ? h('p', { className: 'waycraft-mcp-notice' }, importPreview.scope.note) : null,
-          (importPreview.issues||[]).length ? h('div', { role: 'alert', className: 'waycraft-mcp-alert' }, (importPreview.issues||[]).map((iss:any,i:number)=>h('div',{key:i}, ltr(iss.path||''), iss.path?': ':'', iss.message||String(iss)))) : null,
-          h('ul', { className: 'waycraft-mcp-list' }, (importPreview.candidates||[]).map((c:any,i:number)=>renderCandidate(c, `import:${i}`)))),
+        h(
+          'button',
+          {
+            type: 'submit',
+            disabled: registryBusy,
+            onClick: (event: any) => {
+              event.preventDefault();
+              void searchRegistry();
+            },
+          },
+          t('registrySearch'),
         ),
-      importResult ? h('div', { role: 'status', className: 'waycraft-mcp-alert' }, h('strong', null, t('importRegistered')), importSummary(importResult.stats).map((line: string, i: number) => h('p', { key: i, className: 'waycraft-mcp-notice' }, line)), h('p', { className: 'waycraft-mcp-notice' }, t('importResultNote'))) : null
+      ),
+      registryBusy ? h('p', { role: 'status' }, t('loading')) : null,
+      registryError
+        ? h(
+            'div',
+            { role: 'alert' },
+            registryError,
+            h(
+              'button',
+              { type: 'button', onClick: () => void searchRegistry() },
+              t('retry'),
+            ),
+          )
+        : null,
+      registry && !registryBusy
+        ? h(
+            'div',
+            null,
+            !registry.servers?.length
+              ? h('p', { role: 'status' }, t('registryEmpty'))
+              : null,
+            ...(registry.servers || []).map((server: any) => {
+              const identity = `${server.name}@${server.version}`;
+              const remotes = (server.remotes || []).filter(
+                (remote: any) =>
+                  remote.type === 'streamable-http' &&
+                  /^https?:\/\//i.test(remote.url),
+              );
+              return h(
+                'article',
+                {
+                  key: identity,
+                  className: 'waycraft-mcp-panel',
+                  style: {
+                    borderBlockEnd: '1px solid var(--dsw-alias-border-l3)',
+                    paddingBlock: '12px',
+                  },
+                },
+                h(
+                  'div',
+                  { className: 'waycraft-mcp-row' },
+                  h('strong', null, ltr(server.name)),
+                  h(
+                    'span',
+                    { className: 'waycraft-mcp-meta' },
+                    ltr(server.version),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      'aria-expanded': registryDetail === identity,
+                      onClick: () =>
+                        setRegistryDetail(
+                          registryDetail === identity ? '' : identity,
+                        ),
+                    },
+                    t('registryDetails'),
+                  ),
+                ),
+                h(
+                  'p',
+                  { className: 'waycraft-mcp-note', dir: 'auto' },
+                  server.description,
+                ),
+                registryDetail === identity
+                  ? h(
+                      'div',
+                      { className: 'waycraft-mcp-stack' },
+                      h(
+                        'span',
+                        { className: 'waycraft-mcp-meta' },
+                        t('registryTitle'),
+                      ),
+                      !remotes.length
+                        ? h('p', null, t('registryManual'))
+                        : h(
+                            'p',
+                            { className: 'waycraft-mcp-note' },
+                            t('registryHeaders'),
+                          ),
+                      ...remotes.map((remote: any, index: number) =>
+                        h(
+                          'div',
+                          { key: index, className: 'waycraft-mcp-row' },
+                          ltr(remote.url),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              onClick: () =>
+                                setForm({
+                                  key: `registry-${identity}-${index}`,
+                                  original: null,
+                                  initial: emptyForm({
+                                    transport: 'streamable-http',
+                                    serverName: server.name
+                                      .replace(/[^a-zA-Z0-9_-]/g, '-')
+                                      .slice(0, 64),
+                                    url: remote.url,
+                                    registryReview: true,
+                                    registryRequiredHeaders: remote.headers
+                                      .filter((header: any) => header.required)
+                                      .map((header: any) => header.name),
+                                    headers: remote.headers
+                                      .filter((header: any) => header.required)
+                                      .map((header: any) => `${header.name}: `)
+                                      .join('\n'),
+                                  }),
+                                }),
+                            },
+                            t('registryReview'),
+                          ),
+                        ),
+                      ),
+                    )
+                  : null,
+              );
+            }),
+            registry.nextCursor
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    disabled: registryBusy,
+                    onClick: () => void searchRegistry(registry.nextCursor),
+                  },
+                  t('registryNext'),
+                )
+              : null,
+          )
+        : null,
     );
 
-    const switchControl = (props: { checked: boolean; disabled?: boolean; label: string; title?: string; onToggle: () => void; bare?: boolean; text?: string }) =>
-      h('button', {
-        type: 'button',
-        role: 'switch',
-        'aria-checked': props.checked,
-        'aria-disabled': props.disabled,
-        'aria-label': props.label,
-        title: props.title,
-        className: 'waycraft-mcp-switch' + (props.bare ? '' : ''),
-        disabled: props.disabled,
-        onClick: props.onToggle,
-      }, h('span', { className: 'waycraft-mcp-switch-thumb', 'aria-hidden': 'true' }));
+    const discoveryArea = h(
+      'section',
+      { 'aria-label': t('discoverTitle'), className: 'waycraft-mcp-card' },
+      h(
+        'div',
+        { className: 'waycraft-mcp-card-body' },
+        h('strong', null, t('discoverTitle')),
+        h(
+          'p',
+          { className: 'waycraft-mcp-note' },
+          t('discoverNote'),
+          ' ',
+          t('discoverCandidatesNote'),
+        ),
+        h(
+          'label',
+          null,
+          t('discoverRoots'),
+          h('textarea', {
+            value: discoverRoots,
+            onInput: (e: any) => setDiscoverRoots(e.target.value),
+            rows: 3,
+            spellCheck: false,
+            className: 'waycraft-mcp-mono',
+          }),
+        ),
+        h(
+          'div',
+          { className: 'waycraft-mcp-row' },
+          h(
+            'button',
+            {
+              type: 'button',
+              disabled: !!busy,
+              onClick: () =>
+                void run('discover', async () => {
+                  const roots = discoverRoots
+                    .split(/\n+/)
+                    .map((s: string) => s.trim())
+                    .filter(Boolean);
+                  if (!roots.length) throw new Error(t('discoverRoots'));
+                  const d = await rpc('discover', { roots });
+                  setDiscovery(d.discovery || d);
+                  return d;
+                }),
+            },
+            t('discoverScan'),
+          ),
+        ),
+      ),
+      discovery
+        ? h(
+            'div',
+            { className: 'waycraft-mcp-card' },
+            h(
+              'div',
+              { className: 'waycraft-mcp-card-body' },
+              h(
+                'p',
+                { className: 'waycraft-mcp-meta' },
+                t('discoverCandidate'),
+                ': ',
+                String(discovery.stats?.candidates || 0),
+                ' · ',
+                t('discoverMalformed'),
+                ': ',
+                String(discovery.stats?.malformed || 0),
+                ' · ',
+                t('discoverOversized'),
+                ': ',
+                String(discovery.stats?.oversized || 0),
+              ),
+              (discovery.files || []).length
+                ? (discovery.files || []).map((f: any, i: number) =>
+                    h(
+                      'article',
+                      { key: f.path || i, className: 'waycraft-mcp-card' },
+                      h(
+                        'div',
+                        { className: 'waycraft-mcp-card-body' },
+                        h(
+                          'div',
+                          { className: 'waycraft-mcp-row' },
+                          h(
+                            'strong',
+                            null,
+                            ltr(f.relativePath || f.path || ''),
+                          ),
+                          h(
+                            'span',
+                            { className: 'waycraft-mcp-meta' },
+                            f.status,
+                          ),
+                        ),
+                        f.message
+                          ? h(
+                              'p',
+                              { className: 'waycraft-mcp-notice' },
+                              f.message,
+                            )
+                          : null,
+                        f.preview?.candidates?.length
+                          ? h(
+                              'ul',
+                              { className: 'waycraft-mcp-list' },
+                              f.preview.candidates.map((c: any, j: number) =>
+                                renderCandidate(c, `${f.path}:${j}`),
+                              ),
+                            )
+                          : null,
+                      ),
+                    ),
+                  )
+                : h(
+                    'p',
+                    { className: 'waycraft-mcp-note' },
+                    t('discoverEmpty'),
+                  ),
+            ),
+          )
+        : h('p', { className: 'waycraft-mcp-note' }, t('discoverEmpty')),
+    );
+
+    const importArea = h(
+      'section',
+      { 'aria-label': t('importTitle'), className: 'waycraft-mcp-card' },
+      h(
+        'div',
+        { className: 'waycraft-mcp-card-body' },
+        notice?.kind === 'err'
+          ? h(
+              'p',
+              { role: 'alert', className: 'waycraft-mcp-alert' },
+              notice.text,
+            )
+          : null,
+        h('p', { className: 'waycraft-mcp-note' }, t('importNote')),
+        h('p', { className: 'waycraft-mcp-note' }, t('importFormats')),
+        h(
+          'div',
+          {
+            className: 'waycraft-mcp-dropzone',
+            onDragOver: (e: any) => e.preventDefault(),
+            onDrop: (e: any) => {
+              e.preventDefault();
+              if (!busy) void readImportFiles(e.dataTransfer?.files);
+            },
+          },
+          h('p', null, t('importDrop')),
+          h(
+            'label',
+            { className: 'waycraft-mcp-file-choice' },
+            t('importFile'),
+            h('input', {
+              'aria-label': t('importFile'),
+              type: 'file',
+              accept: '.json,application/json',
+              disabled: !!busy,
+              onChange: (e: any) => {
+                void readImportFiles(e.target.files);
+                e.target.value = '';
+              },
+            }),
+          ),
+          importFileName
+            ? h('p', { role: 'status' }, ltr(importFileName))
+            : null,
+        ),
+        h(
+          'label',
+          null,
+          t('importJson'),
+          h('textarea', {
+            value: importText,
+            disabled: !!busy,
+            onInput: (e: any) => changeImport(e.target.value),
+            rows: 6,
+            spellCheck: false,
+            className: 'waycraft-mcp-mono',
+            dir: 'ltr',
+          }),
+        ),
+        h(
+          'div',
+          { className: 'waycraft-mcp-row' },
+          h(
+            'button',
+            {
+              type: 'button',
+              disabled: !!busy || importReading,
+              onClick: () =>
+                void run('import-preview', async () => {
+                  const generation = importRead.current;
+                  setImportPreview(null);
+                  setImportApprovals({});
+                  setImportResult(null);
+                  if (new TextEncoder().encode(importText).length > 24 * 1024)
+                    throw new Error(t('importFileError'));
+                  let input: any = importText;
+                  try {
+                    input = JSON.parse(importText);
+                  } catch {}
+                  let d: any;
+                  try {
+                    d = await rpc('import_preview', { input });
+                  } catch (error) {
+                    if (!alive.current || generation !== importRead.current)
+                      return;
+                    throw error;
+                  }
+                  if (!alive.current || generation !== importRead.current)
+                    return;
+                  setImportPreview(d.preview || d);
+                  setImportApprovals({});
+                  setImportResult(null);
+                  return d;
+                }),
+            },
+            t('importPreview'),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'waycraft-mcp-primary',
+              disabled: !!busy || !importPreview?.ok,
+              onClick: () =>
+                void run(
+                  'import-register',
+                  async () => {
+                    const approvals = Object.entries(importApprovals)
+                      .filter(([, v]: any) => v?.approved)
+                      .map(([serverName, v]: any) => ({
+                        serverName,
+                        approved: true,
+                        onConflict: v.onConflict || 'skip',
+                      }));
+                    if (!approvals.length)
+                      throw new Error(t('importNoPreview'));
+                    // 207 means a partial import: rpc() throws on ok:false, but the body still carries the per-candidate stats.
+                    let d: any;
+                    try {
+                      d = await rpc('import_register', {
+                        preview: importPreview,
+                        approvals,
+                      });
+                    } catch (e: any) {
+                      if (!e?.data?.import) throw e;
+                      d = e.data;
+                    }
+                    setImportResult(d.import || d);
+                    setImportPreview(null);
+                    setImportApprovals({});
+                    return d;
+                  },
+                  (d: any) => {
+                    // Partial registration (207 or any rejected/failed/skipped candidate): warn instead of the generic success.
+                    const stats = (d.import || d).stats || {};
+                    const partial = ['rejected', 'failed', 'skipped'].some(
+                      (k) => Number(stats[k]) > 0,
+                    );
+                    return partial
+                      ? { kind: 'warn', text: t('importPartialWarning') }
+                      : undefined;
+                  },
+                ),
+            },
+            t('importApproveRegister'),
+          ),
+        ),
+      ),
+      !importPreview
+        ? h('p', { className: 'waycraft-mcp-notice' }, t('importNoPreview'))
+        : h(
+            'div',
+            { className: 'waycraft-mcp-card' },
+            h(
+              'div',
+              { className: 'waycraft-mcp-card-body' },
+              h(
+                'p',
+                { className: 'waycraft-mcp-meta' },
+                t('importValid'),
+                ': ',
+                String(importPreview.stats?.valid || 0),
+                ' · ',
+                t('importInvalid'),
+                ': ',
+                String(importPreview.stats?.invalid || 0),
+                ' · ',
+                t('importConflict'),
+                ': ',
+                String(importPreview.stats?.conflicts || 0),
+              ),
+              importPreview.scope?.note
+                ? h(
+                    'p',
+                    { className: 'waycraft-mcp-notice' },
+                    importPreview.scope.note,
+                  )
+                : null,
+              (importPreview.issues || []).length
+                ? h(
+                    'div',
+                    { role: 'alert', className: 'waycraft-mcp-alert' },
+                    (importPreview.issues || []).map((iss: any, i: number) =>
+                      h(
+                        'div',
+                        { key: i },
+                        ltr(iss.path || ''),
+                        iss.path ? ': ' : '',
+                        iss.message || String(iss),
+                      ),
+                    ),
+                  )
+                : null,
+              h(
+                'ul',
+                { className: 'waycraft-mcp-list' },
+                (importPreview.candidates || []).map((c: any, i: number) =>
+                  renderCandidate(c, `import:${i}`),
+                ),
+              ),
+            ),
+          ),
+      importResult
+        ? h(
+            'div',
+            { role: 'status', className: 'waycraft-mcp-alert' },
+            h('strong', null, t('importRegistered')),
+            importSummary(importResult.stats).map((line: string, i: number) =>
+              h('p', { key: i, className: 'waycraft-mcp-notice' }, line),
+            ),
+            h('p', { className: 'waycraft-mcp-notice' }, t('importResultNote')),
+          )
+        : null,
+    );
+
+    const switchControl = (props: {
+      checked: boolean;
+      disabled?: boolean;
+      label: string;
+      title?: string;
+      onToggle: () => void;
+      bare?: boolean;
+      text?: string;
+    }) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          role: 'switch',
+          'aria-checked': props.checked,
+          'aria-disabled': props.disabled,
+          'aria-label': props.label,
+          title: props.title,
+          className: 'waycraft-mcp-switch' + (props.bare ? '' : ''),
+          disabled: props.disabled,
+          onClick: props.onToggle,
+        },
+        h('span', {
+          className: 'waycraft-mcp-switch-thumb',
+          'aria-hidden': 'true',
+        }),
+      );
 
     // Explicit connection test (#174 B). A failed test returns 502 with the result body; read it from e.data.test.
     // The host returns the refreshed tool cache on both paths; the Tools tab reads it from here.
-    const runTest = (serverName: string) => run('test', async () => {
-      try {
-        const d = await rpc('test_connection', { serverName, expectedFingerprint: fingerprint });
-        setTestResults((m:any)=>({...m,[serverName]:{ ok: !!d.test?.ok, message: String(d.test?.message||'') }}));
-        if (d.toolCache) setToolCache((m:any)=>({...m,[serverName]:d.toolCache}));
-        return d;
-      } catch (e: any) {
-        const msg = String(e?.data?.test?.message || '');
-        if (e?.data?.test) {
-          setTestResults((m:any)=>({...m,[serverName]:{ ok: false, message: msg }}));
-          if (e.data.toolCache) setToolCache((m:any)=>({...m,[serverName]:e.data.toolCache}));
-          throw new Error(`${t('testFailed')}: ${msg}`);
+    function configIdentity(s: any) {
+      return String(
+        s?.reviewedConfigFingerprint || JSON.stringify(s?.config || {}),
+      );
+    }
+    const runTest = (serverName: string) =>
+      run('test', async () => {
+        // An explicit probe supersedes any saved-cache read already in flight.
+        toolsReadGeneration.current++;
+        setToolsRead({ key: toolsKey, loading: false, error: false });
+        const config = configIdentity(
+          servers.find((s: any) => s.serverName === serverName),
+        );
+        try {
+          const d = await rpc('test_connection', {
+            serverName,
+            expectedFingerprint: fingerprint,
+          });
+          setTestResults((m: any) => ({
+            ...m,
+            [serverName]: {
+              ok: !!d.test?.ok,
+              message: String(d.test?.message || ''),
+              config,
+            },
+          }));
+          if (d.toolCache)
+            setToolCache((m: any) => ({ ...m, [serverName]: d.toolCache }));
+          return d;
+        } catch (e: any) {
+          const msg = String(e?.data?.test?.message || '');
+          if (e?.data?.test) {
+            setTestResults((m: any) => ({
+              ...m,
+              [serverName]: { ok: false, message: msg, config },
+            }));
+            if (e.data.toolCache)
+              setToolCache((m: any) => ({
+                ...m,
+                [serverName]: e.data.toolCache,
+              }));
+            throw new Error(`${t('testFailed')}: ${msg}`);
+          }
+          throw e;
         }
-        throw e;
-      }
-    });
-    const testBadge = (serverName: string) => { const r = testResults[serverName]; return r ? (r.ok ? t('testPassed') : t('testFailed')) : t('testBadgeNever'); };
-    const openEdit = (server: any) => setForm({ key: server.serverName, initial: formFromServer(server), original: server });
-
-    const icon = (path: string) => h('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'currentColor', 'aria-hidden': 'true' }, h('path', { d: path }));
-    const ICON = {
-      servers: 'M20 13H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM20 3H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1zM7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z',
-      search: 'M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
-      trash: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
-      edit: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 0 0 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
-      test: 'M8 5v14l11-7z',
-      trust: 'M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z',
+      });
+    const connectionStatus = (s: any) => {
+      if (s.disabled) return ['off', 'connectionOff'];
+      if (trustOf(s.trust) !== 'trusted')
+        return ['warning', 'connectionReview'];
+      const result = testResults[s.serverName];
+      if (result && result.config === configIdentity(s))
+        return result.ok
+          ? ['success', 'connectionPassed']
+          : ['error', 'connectionFailed'];
+      return ['unknown', 'connectionUnknown'];
     };
-    const iconAct = (labelKey: string, path: string, onClick: () => void, cls?: string) =>
-      h('button', { type: 'button', className: 'waycraft-mcp-icon-btn' + (cls ? ' ' + cls : ''), 'aria-label': t(labelKey), title: t(labelKey), disabled: !!busy, onClick }, icon(path));
-    const serverRow = (s:any, inTrash:boolean) => {
+    const openEdit = (server: any) =>
+      setForm({
+        key: server.serverName,
+        initial: formFromServer(server),
+        original: server,
+      });
+
+    const icon = (path: string, viewBox = '0 0 24 24') =>
+      h(
+        'svg',
+        {
+          viewBox,
+          width: 16,
+          height: 16,
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.5,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          'aria-hidden': 'true',
+        },
+        h('path', { d: path }),
+      );
+    const ICON = {
+      servers: 'M4 3h16v7H4zM4 14h16v7H4zM7 6.5h.01M7 17.5h.01',
+      search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
+      trash: 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7',
+      edit: 'M16 3l5 5M3 21l5-1L21 7l-4-4L4 16z',
+      test: 'M8 5v14l11-7z',
+      trust: 'M12 3l8 4v5c0 5-8 9-8 9s-8-4-8-9V7zM8 12l3 3 5-6',
+    };
+    const iconAct = (
+      labelKey: string,
+      path: string,
+      onClick: () => void,
+      cls?: string,
+    ) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          className: 'waycraft-mcp-icon-btn' + (cls ? ' ' + cls : ''),
+          'aria-label': t(labelKey),
+          title: t(labelKey),
+          disabled: !!busy,
+          onClick,
+        },
+        icon(path),
+      );
+    const serverRow = (s: any, inTrash: boolean) => {
       const open = !inTrash && selected === s.serverName;
-      const needsTrust = ['untrusted','invalidated'].includes(trustOf(s.trust));
+      const needsTrust = ['untrusted', 'invalidated'].includes(
+        trustOf(s.trust),
+      );
       const headBadges = [
-        s.trash?.trashed ? h('span', { key: 'tr', className: 'waycraft-mcp-badge waycraft-mcp-badge-warn' }, t('filterTrashed')) : null,
-        !inTrash ? h('span', { key: 'tb', className: 'waycraft-mcp-badge' + (needsTrust ? ' waycraft-mcp-badge-warn' : '') }, needsTrust ? t('trustBadgeUntrusted') : t('trustBadgeTrusted')) : null,
+        s.trash?.trashed
+          ? h(
+              'span',
+              {
+                key: 'tr',
+                className: 'waycraft-mcp-badge waycraft-mcp-badge-warn',
+              },
+              t('filterTrashed'),
+            )
+          : null,
       ];
-      const title = h('span', { className: 'waycraft-mcp-row-title' },
+      const [status, statusKey] = connectionStatus(s);
+      const lastCheck = testResults[s.serverName];
+      const statusTitle = [
+        t(statusKey),
+        lastCheck?.config === configIdentity(s)
+          ? checkedAtLabel(lastCheck.checkedAt)
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      const title = h(
+        'span',
+        { className: 'waycraft-mcp-row-title' },
         h('strong', null, ltr(s.serverName)),
-        h('span', { className: 'waycraft-mcp-row-sub' }, ltr(s.config?.transport), ' · ', ownershipLabel(s.ownership)));
-      return h('article', { key: s.serverName, className: 'waycraft-mcp-card' + (open ? ' is-open' : ''), 'data-waycraft-server': s.serverName },
-        h('div', { className: 'waycraft-mcp-row-head', 'data-off': s.disabled ? '' : undefined },
+      );
+      return h(
+        'article',
+        {
+          key: s.serverName,
+          className: 'waycraft-mcp-card' + (open ? ' is-open' : ''),
+          'data-waycraft-server': s.serverName,
+        },
+        h(
+          'div',
+          {
+            className: 'waycraft-mcp-row-head',
+            'data-off': s.disabled ? '' : undefined,
+          },
+          !inTrash
+            ? h('span', {
+                className: `waycraft-mcp-status waycraft-mcp-status-${status}`,
+                role: 'img',
+                'aria-label': statusTitle,
+                title: statusTitle,
+              })
+            : null,
           inTrash
             ? h('div', { className: 'waycraft-mcp-row-toggle' }, title)
-            : h('button', { type: 'button', className: 'waycraft-mcp-row-toggle', 'aria-expanded': open, onClick: () => { setSelected(open ? null : s.serverName); setTab('overview'); } },
-                h('span', { className: 'waycraft-mcp-chev', 'aria-hidden': 'true' }), title),
+            : h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'waycraft-mcp-row-toggle',
+                  'aria-expanded': open,
+                  onClick: () => {
+                    setSelected(open ? null : s.serverName);
+                    setTab('overview');
+                  },
+                },
+                title,
+              ),
+          !inTrash && needsTrust
+            ? h(
+                'span',
+                {
+                  className: 'waycraft-mcp-badge waycraft-mcp-badge-warn',
+                  title: trustLabel(s.trust),
+                },
+                icon('M12 3L2 21h20zM12 9v5M12 17h.01'),
+                t('trustBadgeUntrusted'),
+              )
+            : null,
+          h(
+            'span',
+            { className: 'waycraft-mcp-row-sub' },
+            ltr(s.config?.transport),
+            ' · ',
+            ownershipLabel(s.ownership),
+          ),
           ...headBadges,
           inTrash
-            ? h(React.Fragment, null,
-                h('button', { type: 'button', disabled: !!busy, onClick: () => setConfirmState({ success: `${t('toastRestored')}: ${s.serverName}`, title: t('restore'), confirmLabel: t('restore'), label: `${t('restore')}: ${s.serverName}?`, fn: () => rpc('restore', { serverName: s.serverName, expectedFingerprint: fingerprint }) }) }, t('restore')),
-                h('button', { type: 'button', className: 'waycraft-mcp-danger', disabled: !!busy, onClick: () => setConfirmState({ success: `${t('toastDeleted')}: ${s.serverName}`, title: t('permanentDelete'), confirmLabel: t('permanentDelete'), label: t('confirmPermanent'), danger: true, fn: () => rpc('permanent_delete', { serverName: s.serverName, expectedFingerprint: fingerprint, confirm: true }) }) }, t('permanentDelete')))
-            : h(React.Fragment, null,
-                testResults[s.serverName] ? h('span', { className: 'waycraft-mcp-badge' + (testResults[s.serverName].ok ? '' : ' waycraft-mcp-badge-warn') }, testBadge(s.serverName)) : null,
-                h('span', { className: 'waycraft-mcp-row-actions' },
-                  iconAct('testConnection', ICON.test, () => void runTest(s.serverName)),
-                  iconAct('editServer', ICON.edit, () => openEdit(s)),
-                  needsTrust ? iconAct('approveTrust', ICON.trust, () => void run('trust', () => rpc('approve_trust', { serverName: s.serverName, reviewedConfigFingerprint: s.reviewedConfigFingerprint, expectedFingerprint: fingerprint })), 'waycraft-mcp-attn') : null,
-                  iconAct('moveToTrash', ICON.trash, () => setConfirmState({ success: `${t('toastTrashed')}: ${s.serverName}`, title: t('moveToTrash'), confirmLabel: t('moveToTrash'), label: t('confirmTrash'), danger: true, fn: () => rpc('trash', { serverName: s.serverName, expectedFingerprint: fingerprint }) }), 'waycraft-mcp-danger')),
-                switchControl({ checked: !s.disabled, disabled: !!busy, label: `${t('configEnabled')}: ${s.serverName}`, title: t('configOffHelp'), onToggle: () => void run('config-off', () => rpc('update', { serverName: s.serverName, expectedFingerprint: fingerprint, patch: { disabled: !s.disabled } })), bare: true }))),
-        open ? h('div', { className: 'waycraft-mcp-card-body' }, detailBody(s)) : null);
+            ? h(
+                React.Fragment,
+                null,
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    disabled: !!busy,
+                    onClick: () =>
+                      setConfirmState({
+                        success: `${t('toastRestored')}: ${s.serverName}`,
+                        title: t('restore'),
+                        confirmLabel: t('restore'),
+                        label: `${t('restore')}: ${s.serverName}?`,
+                        fn: () =>
+                          rpc('restore', {
+                            serverName: s.serverName,
+                            expectedFingerprint: fingerprint,
+                          }),
+                      }),
+                  },
+                  t('restore'),
+                ),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'waycraft-mcp-danger',
+                    disabled: !!busy,
+                    onClick: () =>
+                      setConfirmState({
+                        success: `${t('toastDeleted')}: ${s.serverName}`,
+                        title: t('permanentDelete'),
+                        confirmLabel: t('permanentDelete'),
+                        label: t('confirmPermanent'),
+                        danger: true,
+                        fn: () =>
+                          rpc('permanent_delete', {
+                            serverName: s.serverName,
+                            expectedFingerprint: fingerprint,
+                            confirm: true,
+                          }),
+                      }),
+                  },
+                  t('permanentDelete'),
+                ),
+              )
+            : h(
+                React.Fragment,
+                null,
+                h(
+                  'span',
+                  { className: 'waycraft-mcp-row-actions' },
+                  h(
+                    MoreMenu,
+                    {
+                      label: `${t('more')}: ${s.serverName}`,
+                      disabled: !!busy,
+                    },
+                    iconAct(
+                      'testConnection',
+                      ICON.test,
+                      () => void runTest(s.serverName),
+                    ),
+                    iconAct('editServer', ICON.edit, () => openEdit(s)),
+                    needsTrust
+                      ? iconAct(
+                          'approveTrust',
+                          ICON.trust,
+                          () =>
+                            void run('trust', () =>
+                              rpc('approve_trust', {
+                                serverName: s.serverName,
+                                reviewedConfigFingerprint:
+                                  s.reviewedConfigFingerprint,
+                                expectedFingerprint: fingerprint,
+                              }),
+                            ),
+                          'waycraft-mcp-attn',
+                        )
+                      : null,
+                    iconAct(
+                      'moveToTrash',
+                      ICON.trash,
+                      () =>
+                        setConfirmState({
+                          success: `${t('toastTrashed')}: ${s.serverName}`,
+                          title: t('moveToTrash'),
+                          confirmLabel: t('moveToTrash'),
+                          label: t('confirmTrash'),
+                          danger: true,
+                          fn: () =>
+                            rpc('trash', {
+                              serverName: s.serverName,
+                              expectedFingerprint: fingerprint,
+                            }),
+                        }),
+                      'waycraft-mcp-danger',
+                    ),
+                  ),
+                ),
+                switchControl({
+                  checked: !s.disabled,
+                  disabled: !!busy,
+                  label: `${t('configEnabled')}: ${s.serverName}`,
+                  title: t('configOffHelp'),
+                  onToggle: () =>
+                    void run('config-off', () =>
+                      rpc('update', {
+                        serverName: s.serverName,
+                        expectedFingerprint: fingerprint,
+                        patch: { disabled: !s.disabled },
+                      }),
+                    ),
+                  bare: true,
+                }),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'waycraft-mcp-icon-btn waycraft-mcp-expand',
+                    'aria-label': s.serverName,
+                    'aria-expanded': open,
+                    onClick: () => {
+                      setSelected(open ? null : s.serverName);
+                      setTab('overview');
+                    },
+                  },
+                  h('span', {
+                    className: 'waycraft-mcp-chev',
+                    'aria-hidden': 'true',
+                  }),
+                ),
+              ),
+        ),
+        open
+          ? h('div', { className: 'waycraft-mcp-card-body' }, detailBody(s))
+          : null,
+      );
     };
 
-    const detailBody = (current:any) => h('div', { className: 'waycraft-mcp-detail', 'aria-label': t('tabs') },
-        h('div', { className: 'waycraft-mcp-tabs', role: 'tablist', 'aria-label': t('tabs') },
-          ['overview','tools','configuration','security'].map(id => h('button', { key: id, type: 'button', role: 'tab', 'aria-selected': tab===id, tabIndex: tab===id?0:-1, onClick: ()=>setTab(id) }, t(id==='security'?'security':id)))),
-        tab === 'overview' ? h('div', { role: 'tabpanel', className: 'waycraft-mcp-panel' },
-        h('dl', { className: 'waycraft-mcp-kv' },
-          h('dt',null,t('status')), h('dd',null,statusLabel(current)),
-          h('dt',null,t('trustState')), h('dd',null,trustLabel(current.trust)),
-          h('dt',null,t('transport')), h('dd',null,ltr(current.config?.transport)),
-          h('dt',null,t('savedState')), h('dd',null,savedLabel(current)),
-          h('dt',null,t('runtimeState')), h('dd',null,t('statusRestart')),
-          h('dt',null,t('testOutcome')), h('dd',null,testLabel(testResults[current.serverName])),
+    const detailBody = (current: any) =>
+      h(
+        'div',
+        { className: 'waycraft-mcp-detail', 'aria-label': t('tabs') },
+        h(
+          'div',
+          {
+            className: 'waycraft-mcp-tabs',
+            role: 'tablist',
+            'aria-label': t('tabs'),
+          },
+          ['overview', 'tools', 'configuration', 'security'].map((id) =>
+            h(
+              'button',
+              {
+                key: id,
+                type: 'button',
+                role: 'tab',
+                'aria-selected': tab === id,
+                tabIndex: tab === id ? 0 : -1,
+                onClick: () => setTab(id),
+              },
+              t(id === 'security' ? 'security' : id),
+            ),
+          ),
         ),
-      ) : null,
-      tab === 'tools' ? h('div', { role: 'tabpanel', className: 'waycraft-mcp-panel' },
-        h('p', { className: 'waycraft-mcp-note' }, t('readOnlyTools')),
-        h('div', { className: 'waycraft-mcp-row' },
-          h('button', { type: 'button', disabled: !!busy || !!current.trash?.trashed, onClick: () => void run('tools', async () => { const d = await rpc('list_tools', { serverName: current.serverName }); setToolCache((m:any)=>({...m,[current.serverName]:d})); return d; }) }, t('listTools')),
-          h('button', { type: 'button', disabled: !!busy || !!current.trash?.trashed, onClick: () => void run('refresh', async () => { const d = await rpc('refresh_tools', { serverName: current.serverName, expectedFingerprint: fingerprint }); setToolCache((m:any)=>({...m,[current.serverName]:d})); return d; }) }, t('refreshTools'))),
-        (() => { const tc = toolCache[current.serverName]; const tools = tc?.tools || tc?.cache?.tools || []; if (!tc) return h('p',{className:'waycraft-mcp-note'},t('toolsNever')); if (!tools.length) return h('p',{className:'waycraft-mcp-note'},t('noTools')); return h('div',{className:'waycraft-mcp-tools'}, h('table',null, h('thead',null,h('tr',null,h('th',null,t('toolName')),h('th',null,t('toolDescription')))), h('tbody',null,...tools.map((tool:any)=>h('tr',{key:tool.name},h('td',null,ltr(tool.name)),h('td',null,tool.description||'')))))); })()
-      ) : null,
-      tab === 'configuration' ? h('div', { role: 'tabpanel', className: 'waycraft-mcp-panel' },
-        h('pre', { className: 'waycraft-mcp-pre' }, JSON.stringify(current.config||{}, null, 2)),
-        current.limitation || current.trash?.limitation ? h('p', { role: 'status', className: 'waycraft-mcp-note' }, t('limitation'), ': ', current.limitation || current.trash?.limitation) : null
-      ) : null,
-      tab === 'security' ? h('div', { role: 'tabpanel', className: 'waycraft-mcp-panel' },
-        h('dl', { className: 'waycraft-mcp-kv' },
-          h('dt',null,t('trustState')), h('dd',null,trustLabel(current.trust)),
-          h('dt',null,t('fingerprint')), h('dd',null,ltr(current.reviewedConfigFingerprint || current.trust?.reviewedFingerprint || '')),
-          h('dt',null,t('ownership')), h('dd',null,ownershipLabel(current.ownership)),
-        ),
-        current.trash?.trashed ? h('p',{className:'waycraft-mcp-note'},t('trashedAt'),': ',ltr(current.trash.trashedAt||'')) : null,
-        current.trash?.limitation ? h('p',{role:'status',className:'waycraft-mcp-note'},t('limitation'),': ',current.trash.limitation) : null,
-      ) : null,
-    );
+        tab === 'overview'
+          ? h(
+              'div',
+              { role: 'tabpanel', className: 'waycraft-mcp-panel' },
+              h(
+                'dl',
+                { className: 'waycraft-mcp-kv' },
+                h('dt', null, t('status')),
+                h('dd', null, statusLabel(current)),
+                h('dt', null, t('trustState')),
+                h('dd', null, trustLabel(current.trust)),
+                h('dt', null, t('transport')),
+                h('dd', null, ltr(current.config?.transport)),
+                h('dt', null, t('savedState')),
+                h('dd', null, savedLabel(current)),
+                h('dt', null, t('runtimeState')),
+                h('dd', null, t('statusRestart')),
+                h('dt', null, t('testOutcome')),
+                h(
+                  'dd',
+                  null,
+                  testLabel(
+                    testResults[current.serverName]?.config ===
+                      configIdentity(current)
+                      ? testResults[current.serverName]
+                      : undefined,
+                  ),
+                ),
+              ),
+            )
+          : null,
+        tab === 'tools'
+          ? h(
+              'div',
+              { role: 'tabpanel', className: 'waycraft-mcp-panel' },
+              h('p', { className: 'waycraft-mcp-note' }, t('readOnlyTools')),
+              h(
+                'div',
+                { className: 'waycraft-mcp-row' },
+                toolsRead.error && toolsRead.key === toolsKey
+                  ? h(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => setToolsRetry((n: number) => n + 1),
+                      },
+                      t('retry'),
+                    )
+                  : null,
+                toolsRead.key !== toolsKey || toolsRead.loading
+                  ? h('span', { role: 'status' }, t('loading'))
+                  : null,
+                toolsRead.key === toolsKey && toolsRead.error
+                  ? h('p', { role: 'alert' }, t('toolsReadError'))
+                  : null,
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    disabled: !!busy || !!current.trash?.trashed,
+                    onClick: () =>
+                      void run('refresh', async () => {
+                        const generation = ++toolsReadGeneration.current;
+                        setToolsRead({
+                          key: toolsKey,
+                          loading: false,
+                          error: false,
+                        });
+                        const d = await rpc('refresh_tools', {
+                          serverName: current.serverName,
+                          expectedFingerprint: fingerprint,
+                        });
+                        if (
+                          alive.current &&
+                          generation === toolsReadGeneration.current
+                        )
+                          setToolCache((m: any) => ({
+                            ...m,
+                            [current.serverName]: d,
+                          }));
+                        return d;
+                      }),
+                  },
+                  t('refreshTools'),
+                ),
+              ),
+              (() => {
+                const tc = toolCache[current.serverName];
+                const tools = tc?.tools || tc?.cache?.tools || [];
+                if (!tc)
+                  return h(
+                    'p',
+                    { className: 'waycraft-mcp-note' },
+                    t('toolsNever'),
+                  );
+                if (!tools.length)
+                  return h(
+                    'p',
+                    { className: 'waycraft-mcp-note' },
+                    t('noTools'),
+                  );
+                return h(
+                  'div',
+                  { className: 'waycraft-mcp-tools' },
+                  h(
+                    'table',
+                    null,
+                    h(
+                      'thead',
+                      null,
+                      h(
+                        'tr',
+                        null,
+                        h('th', null, t('toolName')),
+                        h('th', null, t('toolDescription')),
+                      ),
+                    ),
+                    h(
+                      'tbody',
+                      null,
+                      ...tools.map((tool: any) =>
+                        h(
+                          'tr',
+                          { key: tool.name },
+                          h('td', null, ltr(tool.name)),
+                          h('td', null, tool.description || ''),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              })(),
+            )
+          : null,
+        tab === 'configuration'
+          ? h(
+              'div',
+              { role: 'tabpanel', className: 'waycraft-mcp-panel' },
+              h(
+                'pre',
+                { className: 'waycraft-mcp-pre' },
+                JSON.stringify(current.config || {}, null, 2),
+              ),
+              current.limitation || current.trash?.limitation
+                ? h(
+                    'p',
+                    { role: 'status', className: 'waycraft-mcp-note' },
+                    t('limitation'),
+                    ': ',
+                    current.limitation || current.trash?.limitation,
+                  )
+                : null,
+            )
+          : null,
+        tab === 'security'
+          ? h(
+              'div',
+              { role: 'tabpanel', className: 'waycraft-mcp-panel' },
+              h(
+                'dl',
+                { className: 'waycraft-mcp-kv' },
+                h('dt', null, t('trustState')),
+                h('dd', null, trustLabel(current.trust)),
+                h('dt', null, t('fingerprint')),
+                h(
+                  'dd',
+                  null,
+                  ltr(
+                    current.reviewedConfigFingerprint ||
+                      current.trust?.reviewedFingerprint ||
+                      '',
+                  ),
+                ),
+                h('dt', null, t('ownership')),
+                h('dd', null, ownershipLabel(current.ownership)),
+              ),
+              current.trash?.trashed
+                ? h(
+                    'p',
+                    { className: 'waycraft-mcp-note' },
+                    t('trashedAt'),
+                    ': ',
+                    ltr(current.trash.trashedAt || ''),
+                  )
+                : null,
+              current.trash?.limitation
+                ? h(
+                    'p',
+                    { role: 'status', className: 'waycraft-mcp-note' },
+                    t('limitation'),
+                    ': ',
+                    current.trash.limitation,
+                  )
+                : null,
+            )
+          : null,
+      );
 
-    const trustedCount = servers.filter((x:any) => trustOf(x.trust) === 'trusted').length;
-    const needsCount = servers.filter((x:any) => ['untrusted','invalidated'].includes(trustOf(x.trust))).length;
-    const offCount = servers.filter((x:any) => x.disabled).length;
-    const stats = h('div', { className: 'waycraft-mcp-stats', role: 'group', 'aria-label': t('title') },
-      [[servers.length, t('statServers')], [trustedCount, t('statTrusted')], [needsCount, t('statNeedsReview')], [offCount, t('statOff')]].map(([n, label]: any) =>
-        h('div', { key: label, className: 'waycraft-mcp-stat' }, h('strong', null, n), h('span', null, label))));
-    const opt = (v: string, label: string) => h('option', { key: v, value: v }, label);
-    const serversArea = h('div', { className: 'waycraft-mcp-stack' },
-      h('div', { className: 'waycraft-mcp-filterrow', role: 'group', 'aria-label': t('filters') },
-        h('select', { 'aria-label': t('filterAllTransports'), value: fTransport, onChange: (e:any)=>setFTransport(e.target.value) },
-          opt('all', t('filterAllTransports')), opt('stdio', 'stdio'), opt('streamable-http', 'streamable-http')),
-        h('select', { 'aria-label': t('filterAllStatuses'), value: fStatus, onChange: (e:any)=>setFStatus(e.target.value) },
-          opt('all', t('filterAllStatuses')), opt('enabled', t('filterEnabled')), opt('off', t('filterOff'))),
-        h('select', { 'aria-label': t('filterAllTrust'), value: fTrust, onChange: (e:any)=>setFTrust(e.target.value) },
-          opt('all', t('filterAllTrust')), opt('trusted', t('filterTrusted')), opt('needsTrust', t('filterNeedsTrust')))),
-      h('div', { className: 'waycraft-mcp-toolbar', role: 'search' },
-        h('input', { 'aria-label': t('search'), placeholder: t('search'), value: query, onInput: (e:any)=>setQuery(e.target.value) }),
-        h('div', { className: 'waycraft-mcp-iconbar' },
-          h('button', { type: 'button', className: 'waycraft-mcp-icon-btn', 'aria-label': t('refreshAria'), disabled: !!busy, onClick: load, title: t('refresh') }, icon('M17.65 6.35A7.958 7.958 0 0 1 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 0 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z')),
-          h('button', { type: 'button', className: 'waycraft-mcp-icon-btn', 'aria-label': t('addServer'), disabled: !!busy, onClick: () => setForm({ key: Date.now(), initial: emptyForm(), original: null }), title: t('addServer') }, icon('M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z')))),
+    const trustedCount = servers.filter(
+      (x: any) => trustOf(x.trust) === 'trusted',
+    ).length;
+    const needsCount = servers.filter((x: any) =>
+      ['untrusted', 'invalidated'].includes(trustOf(x.trust)),
+    ).length;
+    const offCount = servers.filter((x: any) => x.disabled).length;
+    const stats = h(
+      'div',
+      {
+        className: 'waycraft-mcp-stats',
+        role: 'group',
+        'aria-label': t('title'),
+      },
+      [
+        [servers.length, t('statServers')],
+        [trustedCount, t('statTrusted')],
+        [needsCount, t('statNeedsReview')],
+        [offCount, t('statOff')],
+      ].map(([n, label]: any) =>
+        h(
+          'div',
+          { key: label, className: 'waycraft-mcp-stat' },
+          h('strong', null, n),
+          h('span', null, label),
+        ),
+      ),
+    );
+    const opt = (v: string, label: string) =>
+      h('option', { key: v, value: v }, label);
+    const serversArea = h(
+      'div',
+      { className: 'waycraft-mcp-stack' },
+      h(
+        'div',
+        {
+          className: 'waycraft-mcp-filterrow',
+          role: 'group',
+          'aria-label': t('filters'),
+        },
+        h(
+          'select',
+          {
+            'aria-label': t('filterAllTransports'),
+            value: fTransport,
+            onChange: (e: any) => setFTransport(e.target.value),
+          },
+          opt('all', t('filterAllTransports')),
+          opt('stdio', 'stdio'),
+          opt('streamable-http', 'streamable-http'),
+        ),
+        h(
+          'select',
+          {
+            'aria-label': t('filterAllStatuses'),
+            value: fStatus,
+            onChange: (e: any) => setFStatus(e.target.value),
+          },
+          opt('all', t('filterAllStatuses')),
+          opt('enabled', t('filterEnabled')),
+          opt('off', t('filterOff')),
+        ),
+        h(
+          'select',
+          {
+            'aria-label': t('filterAllTrust'),
+            value: fTrust,
+            onChange: (e: any) => setFTrust(e.target.value),
+          },
+          opt('all', t('filterAllTrust')),
+          opt('trusted', t('filterTrusted')),
+          opt('needsTrust', t('filterNeedsTrust')),
+        ),
+      ),
+      h(
+        'div',
+        { className: 'waycraft-mcp-toolbar', role: 'search' },
+        h('input', {
+          'aria-label': t('search'),
+          placeholder: t('search'),
+          value: query,
+          onInput: (e: any) => setQuery(e.target.value),
+        }),
+        h(
+          'div',
+          { className: 'waycraft-mcp-iconbar' },
+          tooltip(
+            t('refreshAria'),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'waycraft-mcp-icon-btn',
+                'aria-label': t('refreshAria'),
+                disabled: !!busy,
+                onClick: load,
+                title: t('refresh'),
+              },
+              icon('M13 8a5 5 0 1 1-1.5-3.5M13 2.5v3h-3', '0 0 16 16'),
+            ),
+          ),
+          tooltip(
+            t('addServer'),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'waycraft-mcp-icon-btn',
+                'aria-label': t('addServer'),
+                disabled: !!busy,
+                onClick: () =>
+                  setForm({
+                    key: Date.now(),
+                    initial: emptyForm(),
+                    original: null,
+                  }),
+                title: t('addServer'),
+              },
+              icon('M8 3v10M3 8h10', '0 0 16 16'),
+            ),
+          ),
+          tooltip(
+            t('importTitle'),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'waycraft-mcp-icon-btn',
+                'aria-label': t('importTitle'),
+                disabled: !!busy,
+                onClick: () => setImportOpen(true),
+              },
+              icon('M8 2v8M5 7l3 3 3-3M3 11v3h10v-3', '0 0 16 16'),
+            ),
+          ),
+        ),
+      ),
       stats,
-      h('ul', { className: 'waycraft-mcp-list', 'aria-label': t('serverList') }, visibleServers.length ? visibleServers.map((x:any)=>h('li', { key: x.serverName }, serverRow(x,false))) : h('li', { className: 'waycraft-mcp-note' }, t('empty')))
+      h(
+        'ul',
+        { className: 'waycraft-mcp-list', 'aria-label': t('serverList') },
+        visibleServers.length
+          ? visibleServers.map((x: any) =>
+              h('li', { key: x.serverName }, serverRow(x, false)),
+            )
+          : h('li', { className: 'waycraft-mcp-note' }, t('empty')),
+      ),
     );
 
-    const trashArea = h('div', null,
+    const trashArea = h(
+      'div',
+      null,
       h('p', { className: 'waycraft-mcp-note' }, t('trashNote')),
-      h('ul', { className: 'waycraft-mcp-list', 'aria-label': t('trashList') }, trashed.length ? trashed.map((s:any)=>h('li', { key: s.serverName }, serverRow(s,true))) : h('li', { className: 'waycraft-mcp-note' }, t('emptyTrash')))
+      h(
+        'ul',
+        { className: 'waycraft-mcp-list', 'aria-label': t('trashList') },
+        trashed.length
+          ? trashed.map((s: any) =>
+              h('li', { key: s.serverName }, serverRow(s, true)),
+            )
+          : h('li', { className: 'waycraft-mcp-note' }, t('emptyTrash')),
+      ),
     );
 
-    return h('div', { className: 'waycraft-mcp', dir: isArabic()?'rtl':'ltr', 'data-waycraft-mcp-ui': '175' },
+    return h(
+      'div',
+      {
+        className: 'waycraft-mcp',
+        dir: isArabic() ? 'rtl' : 'ltr',
+        'data-waycraft-mcp-ui': '175',
+      },
       h('style', null, STYLE),
-      h('div', { className: 'waycraft-mcp-header' }, h('h2', { className: 'waycraft-mcp-title' }, t('title'))),
+      h(
+        'div',
+        { className: 'waycraft-mcp-header' },
+        h('h2', { className: 'waycraft-mcp-title' }, t('title')),
+      ),
       h(Toast, { notice, onDismiss: () => setNotice(null) }),
-      confirmUi,
-      h('div', { className: 'waycraft-mcp-seg', role: 'tablist', 'aria-label': t('title') },
-        [['servers',t('areaServers')],['discover',t('areaDiscoverImport')],['trash',t('areaTrash')]].map(([id,label]:any)=>h('button',{key:id,type:'button',role:'tab','aria-selected':area===id,tabIndex:area===id?0:-1,onClick:()=>setArea(id)}, icon((ICON as any)[id==='servers'?'servers':id==='discover'?'search':'trash']), label, id==='trash' && trashed.length ? h('span',{className:'waycraft-mcp-badge'},trashed.length) : ''))),
+      h(
+        'div',
+        {
+          className: 'waycraft-mcp-seg',
+          role: 'tablist',
+          'aria-label': t('title'),
+        },
+        [
+          ['servers', t('areaServers')],
+          ['discover', t('areaDiscoverImport')],
+          ['trash', t('areaTrash')],
+        ].map(([id, label]: any) =>
+          h(
+            'button',
+            {
+              key: id,
+              type: 'button',
+              role: 'tab',
+              'aria-selected': area === id,
+              tabIndex: area === id ? 0 : -1,
+              onClick: () => setArea(id),
+            },
+            icon(
+              (ICON as any)[
+                id === 'servers'
+                  ? 'servers'
+                  : id === 'discover'
+                    ? 'search'
+                    : 'trash'
+              ],
+            ),
+            label,
+            id === 'trash' && trashed.length
+              ? h('span', { className: 'waycraft-mcp-badge' }, trashed.length)
+              : '',
+          ),
+        ),
+      ),
       area === 'servers' ? serversArea : null,
-      form ? h(ServerFormDialog, { key: String(form.key), initial: form.initial, original: form.original, fingerprint,
-        onClose: () => setForm(null),
-        // Stale fingerprint: adopt the host's current one and reload; the dialog keeps the typed values.
-        onConflict: (fp?: string) => { if (fp) setFingerprint(fp); void load(); },
-        onSaved: (d: any) => { setForm(null); const name = form.original ? form.original.serverName : d?.server?.serverName; if (name) setTestResults((m:any)=>{ const { [name]: _drop, ...rest } = m; return rest; }); void load().then(() => { if (alive.current) setNotice({ kind: 'ok', text: t('saveDone') }); }); } }) : null,
-      area === 'discover' ? h('div', { className: 'waycraft-mcp-stack' }, registryArea, h('details', null, h('summary', null, t('discoverTitle')), discoveryArea), importArea) : null,
-      area === 'trash' ? trashArea : null
+      form
+        ? h(ServerFormDialog, {
+            key: String(form.key),
+            initial: form.initial,
+            original: form.original,
+            fingerprint,
+            onClose: () => setForm(null),
+            // Stale fingerprint: adopt the host's current one and reload; the dialog keeps the typed values.
+            onConflict: (fp?: string) => {
+              if (fp) setFingerprint(fp);
+              void load();
+            },
+            onSaved: (d: any) => {
+              setForm(null);
+              const name = form.original
+                ? form.original.serverName
+                : d?.server?.serverName;
+              if (name)
+                setTestResults((m: any) => {
+                  const { [name]: _drop, ...rest } = m;
+                  return rest;
+                });
+              void load().then(() => {
+                if (alive.current)
+                  setNotice({ kind: 'ok', text: t('saveDone') });
+              });
+            },
+          })
+        : null,
+      importOpen
+        ? h(
+            ImportDialog,
+            { onClose: closeImport, suspended: !!confirm },
+            importArea,
+          )
+        : null,
+      area === 'discover'
+        ? h(
+            'div',
+            { className: 'waycraft-mcp-stack' },
+            registryArea,
+            h(
+              'details',
+              null,
+              h('summary', null, t('discoverTitle')),
+              discoveryArea,
+            ),
+            h(
+              'button',
+              { type: 'button', onClick: () => setImportOpen(true) },
+              t('importTitle'),
+            ),
+          )
+        : null,
+      area === 'trash' ? trashArea : null,
+      confirmUi,
     );
   }
 
@@ -1481,22 +3987,42 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       if (off || disposed) return;
       off = ctx.slots.inject('settings.section', () =>
         ctx.slots.register(
-          { name: 'settings.section', id: 'waycraft-mcp', order: 92, label: () => t('title') },
+          {
+            name: 'settings.section',
+            id: 'waycraft-mcp',
+            order: 92,
+            label: () => t('title'),
+          },
           McpPanel,
         ),
       );
     };
-    const hide = () => { off?.(); off = undefined; };
+    const hide = () => {
+      off?.();
+      off = undefined;
+    };
     const probe = () =>
       rpc('status')
-        .then(() => { delay = 3000; show(); })
+        .then(() => {
+          delay = 3000;
+          show();
+        })
         .catch((e: any) => {
           if (e?.status === 404) hide();
           else if (e?.status === 401 || e?.status === 403) show();
           else delay = Math.min(delay * 2, 60000);
         })
-        .finally(() => { if (!disposed) { timer = setTimeout(() => void probe(), delay); (timer as any)?.unref?.(); } });
+        .finally(() => {
+          if (!disposed) {
+            timer = setTimeout(() => void probe(), delay);
+            (timer as any)?.unref?.();
+          }
+        });
     void probe();
-    return () => { disposed = true; clearTimeout(timer); hide(); };
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      hide();
+    };
   }, 'waycraft-mcp presence');
 }

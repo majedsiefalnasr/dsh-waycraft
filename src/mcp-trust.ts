@@ -67,17 +67,27 @@ export function reviewedConfigFingerprint(config: unknown): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-export function detectMaterialChange(before: unknown, after: unknown): { changed: boolean; beforeFingerprint: string; afterFingerprint: string } {
+export function detectMaterialChange(
+  before: unknown,
+  after: unknown,
+): { changed: boolean; beforeFingerprint: string; afterFingerprint: string } {
   const beforeFingerprint = reviewedConfigFingerprint(before);
   const afterFingerprint = reviewedConfigFingerprint(after);
-  return { changed: beforeFingerprint !== afterFingerprint, beforeFingerprint, afterFingerprint };
+  return {
+    changed: beforeFingerprint !== afterFingerprint,
+    beforeFingerprint,
+    afterFingerprint,
+  };
 }
 
 export function emptyTrust(reason = 'not_approved'): McpTrustApproval {
   return { state: 'untrusted', fingerprint: null, reason };
 }
 
-export function trustFromRowMeta(meta: unknown, config: unknown): McpTrustApproval {
+export function trustFromRowMeta(
+  meta: unknown,
+  config: unknown,
+): McpTrustApproval {
   if (!isRecord(meta) || !isRecord(meta.trust)) return emptyTrust();
   const t = meta.trust as Record<string, unknown>;
   const approvedFp = typeof t.fingerprint === 'string' ? t.fingerprint : null;
@@ -90,21 +100,33 @@ export function trustFromRowMeta(meta: unknown, config: unknown): McpTrustApprov
     };
   }
   if (t.state === 'trusted' && approvedFp && approvedFp !== currentFp) {
-    return { state: 'invalidated', fingerprint: approvedFp, invalidatedAt: new Date().toISOString(), reason: 'material_change' };
+    return {
+      state: 'invalidated',
+      fingerprint: approvedFp,
+      invalidatedAt: new Date().toISOString(),
+      reason: 'material_change',
+    };
   }
   if (t.state === 'invalidated') {
     return {
       state: 'invalidated',
       fingerprint: approvedFp,
-      invalidatedAt: typeof t.invalidatedAt === 'string' ? t.invalidatedAt : undefined,
+      invalidatedAt:
+        typeof t.invalidatedAt === 'string' ? t.invalidatedAt : undefined,
       reason: typeof t.reason === 'string' ? t.reason : 'invalidated',
     };
   }
   return emptyTrust(typeof t.reason === 'string' ? t.reason : 'not_approved');
 }
 
-export function applyTrustApprovalMeta(rowMeta: unknown, config: unknown, now = new Date()): Record<string, unknown> {
-  const meta = isRecord(rowMeta) ? { ...rowMeta } : { owner: 'waycraft', version: 1 };
+export function applyTrustApprovalMeta(
+  rowMeta: unknown,
+  config: unknown,
+  now = new Date(),
+): Record<string, unknown> {
+  const meta: Record<string, unknown> = isRecord(rowMeta)
+    ? { ...rowMeta }
+    : { owner: 'waycraft', version: 1 };
   meta.trust = {
     state: 'trusted',
     fingerprint: reviewedConfigFingerprint(config),
@@ -113,9 +135,17 @@ export function applyTrustApprovalMeta(rowMeta: unknown, config: unknown, now = 
   return meta;
 }
 
-export function invalidateTrustMeta(rowMeta: unknown, reason = 'material_change', now = new Date()): Record<string, unknown> {
-  const meta = isRecord(rowMeta) ? { ...rowMeta } : { owner: 'waycraft', version: 1 };
-  const prev = isRecord(meta.trust) ? (meta.trust as Record<string, unknown>) : {};
+export function invalidateTrustMeta(
+  rowMeta: unknown,
+  reason = 'material_change',
+  now = new Date(),
+): Record<string, unknown> {
+  const meta: Record<string, unknown> = isRecord(rowMeta)
+    ? { ...rowMeta }
+    : { owner: 'waycraft', version: 1 };
+  const prev = isRecord(meta.trust)
+    ? (meta.trust as Record<string, unknown>)
+    : {};
   meta.trust = {
     state: 'invalidated',
     fingerprint: typeof prev.fingerprint === 'string' ? prev.fingerprint : null,
@@ -126,18 +156,27 @@ export function invalidateTrustMeta(rowMeta: unknown, reason = 'material_change'
 }
 
 export function clearTrustForSave(rowMeta: unknown): Record<string, unknown> {
-  const meta = isRecord(rowMeta) ? { ...rowMeta } : { owner: 'waycraft', version: 1 };
+  const meta: Record<string, unknown> = isRecord(rowMeta)
+    ? { ...rowMeta }
+    : { owner: 'waycraft', version: 1 };
   // Saving reviewed config through create path starts untrusted.
   if (!meta.trust) meta.trust = emptyTrust('save_does_not_imply_trust');
   return meta;
 }
 
-export function assertTrustApprovedForAction(trust: McpTrustApproval, action: string): void {
+export function assertTrustApprovedForAction(
+  trust: McpTrustApproval,
+  action: string,
+): void {
   if (trust.state === 'trusted') return;
-  const msg = trust.state === 'invalidated'
-    ? `Trust approval invalidated for this server; review material changes and re-approve before ${action}.`
-    : `Trust approval required before ${action}. Saving does not imply trust.`;
-  const err = new Error(msg) as Error & { code: string; trust: McpTrustApproval };
+  const msg =
+    trust.state === 'invalidated'
+      ? `Trust approval invalidated for this server; review material changes and re-approve before ${action}.`
+      : `Trust approval required before ${action}. Saving does not imply trust.`;
+  const err = new Error(msg) as Error & {
+    code: string;
+    trust: McpTrustApproval;
+  };
   err.code = 'trust_required';
   err.trust = trust;
   throw err;

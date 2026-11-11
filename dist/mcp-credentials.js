@@ -95,14 +95,16 @@ export function redactMcpConfigForSurface(config) {
     if (c.env && typeof c.env === 'object' && !Array.isArray(c.env)) {
         const env = {};
         for (const [k, v] of Object.entries(c.env)) {
-            env[k] = typeof v === 'string' ? (hasCredentialRef(v) ? v : '[REDACTED]') : v;
+            env[k] =
+                typeof v === 'string' ? (hasCredentialRef(v) ? v : '[REDACTED]') : v;
         }
         c.env = env;
     }
     if (c.headers && typeof c.headers === 'object' && !Array.isArray(c.headers)) {
         const headers = {};
         for (const [k, v] of Object.entries(c.headers)) {
-            headers[k] = typeof v === 'string' ? (hasCredentialRef(v) ? v : '[REDACTED]') : v;
+            headers[k] =
+                typeof v === 'string' ? (hasCredentialRef(v) ? v : '[REDACTED]') : v;
         }
         c.headers = headers;
     }
@@ -128,9 +130,13 @@ export function sanitizeMcpServerEntryForSurface(entry) {
         out.rawRow = row;
     }
     if (Array.isArray(out.servers))
-        out.servers = out.servers.map((s) => s && typeof s === 'object' ? sanitizeMcpServerEntryForSurface(s) : s);
+        out.servers = out.servers.map((s) => s && typeof s === 'object'
+            ? sanitizeMcpServerEntryForSurface(s)
+            : s);
     if (Array.isArray(out.trashedServers))
-        out.trashedServers = out.trashedServers.map((s) => s && typeof s === 'object' ? sanitizeMcpServerEntryForSurface(s) : s);
+        out.trashedServers = out.trashedServers.map((s) => s && typeof s === 'object'
+            ? sanitizeMcpServerEntryForSurface(s)
+            : s);
     if (out.server && typeof out.server === 'object')
         out.server = sanitizeMcpServerEntryForSurface(out.server);
     return out;

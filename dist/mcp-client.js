@@ -108,6 +108,18 @@ function setupMcp(ctx, fail) {
 	};
 	const React = require("react");
 	const h = React.createElement;
+	let primitives = {};
+	try {
+		primitives = require("@deepseek-ai/dsh-client-ui-primitives") || {};
+	} catch {}
+	function tooltip(label, anchor) {
+		if (!primitives.Tooltip) return anchor;
+		return h(primitives.Tooltip, {
+			label,
+			side: "bottom",
+			portal: true
+		}, React.cloneElement(anchor, { title: void 0 }));
+	}
 	const en = {
 		title: "MCP servers",
 		description: "Manage MCP servers for this DSH profile. Management actions require Owner authorization.",
@@ -158,7 +170,13 @@ function setupMcp(ctx, fail) {
 		discoverCandidatesNote: "Candidates are presented for explicit review and registration. Discovery does not auto-activate servers.",
 		importTitle: "Import MCP configuration",
 		importNote: "Paste supported JSON. Preview is required before explicit registration approval. Import never executes servers and does not imply trust.",
-		importJson: "Import JSON",
+		importJson: "Paste JSON (optional)",
+		importFile: "Choose JSON file",
+		importDrop: "Drop an MCP configuration JSON file here",
+		importFormats: "Supported: .json files containing an mcpServers map or a Waycraft MCP v1 envelope. One file at a time; maximum 24 KiB. YAML, ZIP and server.json registry manifests are not supported.",
+		importFileError: "Choose one valid JSON configuration file, no larger than 24 KiB.",
+		importDiscard: "Discard this import preview and selected configuration?",
+		toolsReadError: "Unable to read saved tools. Try again.",
 		importPreview: "Preview import",
 		importApproveRegister: "Register approved candidates",
 		importNoPreview: "Preview the import before registration.",
@@ -231,6 +249,7 @@ function setupMcp(ctx, fail) {
 		serverList: "MCP server list",
 		trashList: "Trashed MCP servers",
 		refreshAria: "Refresh servers",
+		more: "More actions",
 		editServer: "Edit",
 		addTitle: "Add MCP server",
 		editTitle: "Edit MCP server",
@@ -283,7 +302,13 @@ function setupMcp(ctx, fail) {
 		statusNotSaved: "Not saved",
 		statusRestart: "Restart may be required — runtime application not verified",
 		statusRestartNote: "Waycraft saves the config; it cannot confirm the running DSH runtime has picked it up.",
-		testNever: "Not tested in this session",
+		connectionOff: "Configured off; runtime state not verified",
+		connectionReview: "Trust review required; connection not verified",
+		connectionPassed: "Last connection check succeeded; not a live monitor",
+		connectionFailed: "Last connection check failed; not a live monitor",
+		connectionUnknown: "Connection unknown; no saved connection check",
+		checkedAt: "Last checked: {time}",
+		testNever: "No saved connection check",
 		testBadgeNever: "Not tested",
 		testPassed: "Test passed",
 		testFailed: "Test failed",
@@ -356,7 +381,13 @@ function setupMcp(ctx, fail) {
 		discoverCandidatesNote: "تُعرض المرشحات للمراجعة والتسجيل الصريح. الاكتشاف لا يفعّل الخوادم تلقائيًا.",
 		importTitle: "استيراد إعداد MCP",
 		importNote: "ألصق JSON مدعومًا. المعاينة مطلوبة قبل موافقة التسجيل الصريحة. الاستيراد لا ينفّذ الخوادم ولا يعني الثقة.",
-		importJson: "JSON للاستيراد",
+		importJson: "لصق JSON (اختياري)",
+		importFile: "اختيار ملف JSON",
+		importDrop: "أفلت ملف إعداد MCP بصيغة JSON هنا",
+		importFormats: "المدعوم: ملفات .json تحتوي على خريطة mcpServers أو إعداد Waycraft MCP v1. ملف واحد بحد أقصى 24 KiB. لا ندعم YAML أو ZIP أو ملفات server.json الخاصة بالسجلات.",
+		importFileError: "اختر ملف إعداد JSON واحدًا صالحًا بحجم لا يتجاوز 24 KiB.",
+		importDiscard: "تجاهل معاينة الاستيراد والإعداد المحدد؟",
+		toolsReadError: "تعذرت قراءة الأدوات المحفوظة. حاول مجددًا.",
 		importPreview: "معاينة الاستيراد",
 		importApproveRegister: "تسجيل المرشحين المعتمدين",
 		importNoPreview: "عاين الاستيراد قبل التسجيل.",
@@ -429,6 +460,7 @@ function setupMcp(ctx, fail) {
 		serverList: "قائمة خوادم MCP",
 		trashList: "خوادم MCP في سلة المهملات",
 		refreshAria: "تحديث الخوادم",
+		more: "المزيد من الإجراءات",
 		editServer: "تعديل",
 		addTitle: "إضافة خادم MCP",
 		editTitle: "تعديل خادم MCP",
@@ -481,7 +513,13 @@ function setupMcp(ctx, fail) {
 		statusNotSaved: "غير محفوظ",
 		statusRestart: "قد يلزم إعادة التشغيل — لم يتم التحقق من تطبيقه على وقت التشغيل",
 		statusRestartNote: "تحفظ Waycraft الإعداد؛ ولا تستطيع التأكد من أن وقت تشغيل DSH الجاري قد التقطه.",
-		testNever: "لم يُختبر في هذه الجلسة",
+		connectionOff: "معطّل في الإعداد؛ لم يتم التحقق من حالة التشغيل",
+		connectionReview: "مراجعة الثقة مطلوبة؛ لم يتم التحقق من الاتصال",
+		connectionPassed: "نجح آخر فحص اتصال؛ ليست مراقبة مباشرة",
+		connectionFailed: "فشل آخر فحص اتصال؛ ليست مراقبة مباشرة",
+		connectionUnknown: "حالة الاتصال غير معروفة؛ لا يوجد فحص اتصال محفوظ",
+		checkedAt: "آخر فحص: {time}",
+		testNever: "لا يوجد فحص اتصال محفوظ",
 		testBadgeNever: "غير مُختبر",
 		testPassed: "نجح الاختبار",
 		testFailed: "فشل الاختبار",
@@ -701,9 +739,18 @@ function setupMcp(ctx, fail) {
 	function savedLabel(server) {
 		return server ? t("statusSaved") : t("statusNotSaved");
 	}
+	function checkedAtLabel(checkedAt) {
+		if (!checkedAt || !Number.isFinite(Date.parse(checkedAt))) return "";
+		const time = new Date(checkedAt).toLocaleString(isArabic() ? "ar" : "en");
+		return t("checkedAt").replace("{time}", time);
+	}
 	function testLabel(result) {
 		if (!result) return t("testNever");
-		return result.ok ? `${t("testPassed")}: ${result.message}` : `${t("testFailed")}: ${result.message}`;
+		return [
+			t(result.ok ? "connectionPassed" : "connectionFailed"),
+			result.message,
+			checkedAtLabel(result.checkedAt)
+		].filter(Boolean).join(" · ");
 	}
 	function importSummary(stats) {
 		const n = (k) => Number(stats?.[k] || 0);
@@ -724,7 +771,7 @@ function setupMcp(ctx, fail) {
 
 /* ===== Header ===== */
 .waycraft-mcp-header{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.waycraft-mcp-title{margin:0;flex:1 1 auto;font-size:18px;line-height:26px;font-weight:600;color:var(--dsw-alias-label-primary)}
+.waycraft-mcp-title{margin:0;flex:1 1 auto;font-size:18px;line-height:26px;font-weight:500;color:var(--dsw-alias-label-primary)}
 
 /* ===== Toolbar / filters ===== */
 .waycraft-mcp-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -770,7 +817,7 @@ function setupMcp(ctx, fail) {
 .waycraft-mcp-seg{display:flex;flex-wrap:wrap;gap:4px;background:var(--dsw-alias-bg-layer-1);border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md,12px);padding:4px}
 .waycraft-mcp-seg button{flex:0 1 auto;min-block-size:32px;padding-inline:12px;border:none;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit}
 .waycraft-mcp-seg button:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
-.waycraft-mcp-seg button[aria-pressed="true"],.waycraft-mcp-seg button[aria-checked="true"],.waycraft-mcp-seg button[aria-selected="true"]{background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-weight:600}
+.waycraft-mcp-seg button[aria-pressed="true"],.waycraft-mcp-seg button[aria-checked="true"],.waycraft-mcp-seg button[aria-selected="true"]{background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-weight:500}
 .waycraft-mcp-seg button:disabled{opacity:.5;cursor:not-allowed}
 
 /* ===== Panels & KV ===== */
@@ -792,6 +839,12 @@ function setupMcp(ctx, fail) {
 .waycraft-mcp-alert{margin:0;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-state-error-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
 .waycraft-mcp-alert.waycraft-mcp-alert-warn{background:var(--dsw-alias-state-warning-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-warning-primary)}
 .waycraft-mcp-field-error{margin:0;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-state-error-bg,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
+.waycraft-mcp-dropzone{border:1px dashed var(--dsw-alias-border-l3);border-radius:12px;padding:20px;text-align:center;background:var(--dsw-alias-bg-layer-1)}
+.waycraft-mcp-file-choice{position:relative;display:inline-flex;padding:6px 12px;color:var(--dsw-alias-state-business-primary);border-radius:8px;cursor:pointer}
+.waycraft-mcp-file-choice input[type=file]{position:absolute;inset:0;inline-size:100%;block-size:100%;opacity:0;cursor:pointer}
+.waycraft-mcp-file-choice:focus-within{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
+.waycraft-mcp-file-choice:hover{background:var(--dsw-alias-bg-layer-3)}
+.waycraft-mcp-dialog-body>.waycraft-mcp-card{border:0;background:transparent;border-radius:0;overflow:visible}
 .waycraft-mcp-dialog-sm{inline-size:min(440px,100%)}
 .waycraft-mcp-confirm-msg{margin:0;line-height:20px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
 .waycraft-mcp button.waycraft-mcp-danger-solid{background:var(--dsw-alias-state-error-primary);border-color:transparent;color:var(--dsw-alias-label-primary-foreground,var(--dsw-alias-bg-base))}
@@ -811,7 +864,7 @@ function setupMcp(ctx, fail) {
 .waycraft-mcp-overlay{position:fixed;inset:0;z-index:1000;container-type:normal;max-inline-size:none;inline-size:auto;display:flex;align-items:center;justify-content:center;padding:16px;background:color-mix(in srgb,var(--dsw-alias-bg-base) 60%,transparent);overflow:auto}
 .waycraft-mcp-dialog{container-type:inline-size;inline-size:min(600px,100%);max-block-size:calc(100dvh - 32px);display:flex;flex-direction:column;overflow:hidden;border:0.5px solid var(--dsw-alias-border-l3,var(--dsw-alias-border-l2));border-radius:var(--dsw-radius-xl,20px);background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-soft,var(--dsw-shadow-lv3))}
 .waycraft-mcp-dialog-head{padding:16px 24px;border-block-end:0.5px solid var(--dsw-alias-border-l2)}
-.waycraft-mcp-dialog-head h3{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.waycraft-mcp-dialog-head h3{margin:0;font-size:16px;line-height:24px;font-weight:500}
 .waycraft-mcp-dialog-body{display:flex;flex-direction:column;gap:16px;padding:24px;overflow:auto;min-block-size:0}
 .waycraft-mcp-dialog-footer{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:16px 24px;border-block-start:0.5px solid var(--dsw-alias-border-l2)}
 .waycraft-mcp-fields{display:grid;gap:12px}
@@ -825,7 +878,7 @@ function setupMcp(ctx, fail) {
 .waycraft-mcp-advanced>summary{cursor:pointer;min-block-size:28px;color:var(--dsw-alias-label-secondary)}
 .waycraft-mcp-advanced>.waycraft-mcp-fields{padding-block:8px}
 .waycraft-mcp-preview{display:flex;flex-direction:column;gap:4px}
-@container (min-width: 480px){.waycraft-mcp-fields{grid-template-columns:1fr 1fr}.waycraft-mcp-fields>.waycraft-mcp-field:first-child:last-child{grid-column:1/-1}}
+@container (min-width:480px){.waycraft-mcp-advanced .waycraft-mcp-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* ===== Structure aligned with the Skill manager (stats strip, expandable rows, joined icon bar) ===== */
 .waycraft-mcp-stack{display:flex;flex-direction:column;gap:12px}
@@ -833,21 +886,27 @@ function setupMcp(ctx, fail) {
 .waycraft-mcp-stat{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;text-align:center;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
 .waycraft-mcp-stat+.waycraft-mcp-stat{border-inline-start:0.5px solid var(--dsw-alias-border-l2)}
 .waycraft-mcp-stat strong{font-size:18px;line-height:26px;color:var(--dsw-alias-label-primary)}
-.waycraft-mcp-toolbar input{flex:1 1 160px}
+.waycraft-mcp .waycraft-mcp-toolbar input:not([type=checkbox]):not([type=radio]){flex:1 1 180px;block-size:32px;min-block-size:32px;padding-block:0}
 .waycraft-mcp-toolbar select{flex:0 1 150px;max-inline-size:240px}
-.waycraft-mcp-filterrow select{flex:0 1 150px;max-inline-size:240px}
+.waycraft-mcp-filterrow select{inline-size:100%}
 .waycraft-mcp-iconbar{display:inline-flex;flex:none;align-items:stretch;block-size:32px;margin-inline-start:auto;border:0.5px solid var(--dsw-alias-border-l4,var(--dsw-alias-border-l2));border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);overflow:hidden}
 .waycraft-mcp .waycraft-mcp-iconbar button.waycraft-mcp-icon-btn{inline-size:32px;block-size:100%;min-block-size:0;border-radius:0;color:var(--dsw-alias-label-secondary)}
 .waycraft-mcp .waycraft-mcp-iconbar button.waycraft-mcp-icon-btn+button.waycraft-mcp-icon-btn{border-inline-start:0.5px solid var(--dsw-alias-border-l2)}
 .waycraft-mcp .waycraft-mcp-iconbar button.waycraft-mcp-icon-btn:focus-visible{outline-offset:-2px}
-.waycraft-mcp-row-head{display:flex;align-items:center;gap:8px;min-block-size:44px;padding:8px 16px}
+.waycraft-mcp-row-head{position:relative;display:flex;align-items:center;gap:8px;min-block-size:44px;padding:8px 16px}
+/* Extend the native disclosure button across the summary without nesting its other controls. */
+.waycraft-mcp-row-head button.waycraft-mcp-row-toggle::after{content:"";position:absolute;inset:0}
+.waycraft-mcp-row-actions,.waycraft-mcp-row-head>.waycraft-mcp-switch,.waycraft-mcp-row-head>.waycraft-mcp-expand{position:relative;z-index:1}
 .waycraft-mcp-row-head[data-off]>.waycraft-mcp-row-toggle{opacity:.6}
-.waycraft-mcp .waycraft-mcp-row-toggle{flex:1 1 auto;display:flex;align-items:center;gap:8px;min-inline-size:0;padding:0;border:0;background:transparent;text-align:start;cursor:pointer;border-radius:var(--dsw-radius-sm,8px)}
+.waycraft-mcp .waycraft-mcp-row-toggle{flex:0 1 auto;display:flex;align-items:center;gap:8px;min-inline-size:0;padding:0;border:0;background:transparent;text-align:start;cursor:pointer;border-radius:var(--dsw-radius-sm,8px)}
 .waycraft-mcp div.waycraft-mcp-row-toggle{cursor:default}
 .waycraft-mcp .waycraft-mcp-row-toggle:hover:not(:disabled){background:transparent}
-.waycraft-mcp-row-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;min-inline-size:0}
+.waycraft-mcp-row-title{min-inline-size:0}
 .waycraft-mcp-row-title strong{font-weight:600;overflow-wrap:anywhere}
-.waycraft-mcp-row-sub{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;font-weight:400}
+.waycraft-mcp-row-sub{flex:1 1 0;min-inline-size:0;margin-inline-start:auto;text-align:end;color:var(--dsw-alias-label-secondary);font-size:14px;line-height:22px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.waycraft-mcp-row-head button.waycraft-mcp-icon-btn{flex:none;inline-size:28px;block-size:28px;min-block-size:28px;border-radius:var(--dsw-radius-sm,8px);color:var(--dsw-alias-label-tertiary)}
+.waycraft-mcp-row-head button.waycraft-mcp-icon-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,var(--dsw-alias-bg-layer-3));color:var(--dsw-alias-label-primary)}
+.waycraft-mcp-row-head>.waycraft-mcp-status{margin-inline:4px}
 .waycraft-mcp-chev{flex:none;inline-size:6px;block-size:6px;margin-inline:4px;border-inline-end:1.5px solid var(--dsw-alias-label-tertiary);border-block-end:1.5px solid var(--dsw-alias-label-tertiary);transform:rotate(-45deg);transition:transform .2s cubic-bezier(.4,0,.2,1)}
 .waycraft-mcp-card:dir(rtl) .waycraft-mcp-chev{transform:rotate(135deg)}
 .waycraft-mcp-card.is-open .waycraft-mcp-chev,.waycraft-mcp-card.is-open:dir(rtl) .waycraft-mcp-chev{transform:rotate(45deg)}
@@ -855,8 +914,10 @@ function setupMcp(ctx, fail) {
 .waycraft-mcp-card-body{padding:12px 16px;gap:12px}
 .waycraft-mcp-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 /* ===== Skill-manager-aligned filter row, area tabs, detail tabs, row actions ===== */
-.waycraft-mcp-filterrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.waycraft-mcp-filterrow>select{flex:0 1 200px;min-inline-size:140px}
+.waycraft-mcp-filterrow{display:flex;gap:8px;flex-wrap:wrap}
+.waycraft-mcp-filterrow select{flex:0 1 150px;min-inline-size:0;max-inline-size:240px}
+@container (max-width:520px){.waycraft-mcp-filterrow select{flex:1 1 100%;max-inline-size:none}}
+@supports not (container-type:inline-size){@media (max-width:520px){.waycraft-mcp-filterrow select{flex:1 1 100%;max-inline-size:none}}}
 .waycraft-mcp-header+.waycraft-mcp-seg,.waycraft-mcp>.waycraft-mcp-seg{display:inline-flex;max-inline-size:100%;align-self:flex-start}
 .waycraft-mcp-seg button{display:inline-flex;align-items:center;gap:8px;padding-inline:8px;min-block-size:28px}
 .waycraft-mcp-seg button svg{flex:none;color:var(--dsw-alias-label-secondary)}
@@ -868,7 +929,7 @@ function setupMcp(ctx, fail) {
 .waycraft-mcp .waycraft-mcp-row-actions button.waycraft-mcp-icon-btn:hover:not(:disabled){color:var(--dsw-alias-label-primary)}
 .waycraft-mcp .waycraft-mcp-row-actions button.waycraft-mcp-icon-btn.waycraft-mcp-attn{color:var(--dsw-alias-brand-primary)}
 .waycraft-mcp .waycraft-mcp-row-actions button.waycraft-mcp-icon-btn.waycraft-mcp-danger{color:var(--dsw-alias-state-error-primary)}
-@container (max-width: 520px){.waycraft-mcp-row-head{flex-wrap:wrap}.waycraft-mcp .waycraft-mcp-row-head>.waycraft-mcp-row-toggle{flex:1 1 100%}}
+@container (max-width:520px){.waycraft-mcp-row-head{flex-wrap:wrap}.waycraft-mcp .waycraft-mcp-row-head>.waycraft-mcp-row-toggle{flex:1 1 auto;min-inline-size:4ch;white-space:nowrap}.waycraft-mcp-row-sub{display:none}}
 .waycraft-mcp-spacer{flex:1 1 0}
 .waycraft-mcp-detail{display:flex;flex-direction:column;gap:12px}
 .waycraft-mcp-note{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
@@ -888,8 +949,8 @@ function setupMcp(ctx, fail) {
 .waycraft-mcp-badge-warn{background:var(--dsw-alias-state-warning-bg,var(--dsw-alias-bg-layer-3));border-color:var(--dsw-alias-state-warning-border,var(--dsw-alias-border-l2));color:var(--dsw-alias-state-warning-primary)}
 
 /* ===== Switch (toggle) ===== */
-.waycraft-mcp-switch{box-sizing:border-box;position:relative;display:flex;align-items:center;justify-content:flex-start;flex:0 0 auto;inline-size:36px;min-inline-size:36px;block-size:20px;min-block-size:0;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);font-size:0;line-height:0;cursor:pointer}
-.waycraft-mcp-switch[aria-checked=true]{background:var(--dsw-alias-brand-primary)}
+.waycraft-mcp button.waycraft-mcp-switch{box-sizing:border-box;position:relative;display:flex;align-items:center;justify-content:flex-start;flex:0 0 auto;inline-size:36px;min-inline-size:36px;block-size:20px;min-block-size:0;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);font-size:0;line-height:0;cursor:pointer}
+.waycraft-mcp button.waycraft-mcp-switch[aria-checked=true]{background:var(--dsw-alias-brand-primary)}
 .waycraft-mcp-switch:hover:not(:disabled),.waycraft-mcp-switch:active:not(:disabled){background:var(--dsw-alias-border-l3)}
 .waycraft-mcp-switch[aria-checked=true]:hover:not(:disabled),.waycraft-mcp-switch[aria-checked=true]:active:not(:disabled){background:var(--dsw-alias-brand-primary)}
 .waycraft-mcp-switch:disabled{cursor:default;opacity:.5}
@@ -908,6 +969,29 @@ function setupMcp(ctx, fail) {
 @container (max-width: 520px){.waycraft-mcp-source-meta .waycraft-mcp-path{display:none}}
 @supports not (container-type:inline-size){@media (max-width:520px){.waycraft-mcp-source-meta .waycraft-mcp-path{display:none}}}
 
+/* Local variants keep generic button rules from overriding geometry. */
+.waycraft-mcp button.waycraft-mcp-switch:hover:not(:disabled),.waycraft-mcp button.waycraft-mcp-switch:active:not(:disabled){background:var(--dsw-alias-border-l3)}
+.waycraft-mcp button.waycraft-mcp-switch[aria-checked=true]:hover:not(:disabled),.waycraft-mcp button.waycraft-mcp-switch[aria-checked=true]:active:not(:disabled){background:var(--dsw-alias-brand-primary)}
+.waycraft-mcp-status{flex:none;inline-size:8px;block-size:8px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}
+.waycraft-mcp-status-success{background:var(--dsw-alias-state-success-primary,#15803d)}
+.waycraft-mcp-status-error{background:var(--dsw-alias-state-error-primary)}
+.waycraft-mcp-status-warning{background:var(--dsw-alias-state-warning-primary,#b45309)}
+.waycraft-mcp-status-unknown{background:transparent;box-shadow:inset 0 0 0 1.5px var(--dsw-alias-label-tertiary)}
+.waycraft-mcp-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.waycraft-mcp-dialog-head h3{font-weight:500}
+.waycraft-mcp-dialog-body .waycraft-mcp-notice{background:transparent;padding:0;color:var(--dsw-alias-label-secondary);font-size:13px}
+.waycraft-mcp-dialog-body .waycraft-mcp-seg{align-self:flex-start}
+.waycraft-mcp-dialog-footer button{min-block-size:36px;border-radius:var(--dsw-radius-md,12px)}
+.waycraft-mcp-menu{position:fixed;z-index:1050;container-type:normal;inline-size:max-content;max-inline-size:calc(100vw - 16px);max-block-size:calc(100dvh - 16px);overflow:auto;padding:4px;border-radius:var(--dsw-radius-md,12px);background:var(--dsw-menu-surface-fill,var(--dsw-alias-bg-layer-2));backdrop-filter:var(--dsw-menu-backdrop-filter,none);box-shadow:var(--dsw-elevation-prominent,var(--dsw-elevation-panel,var(--dsw-shadow-lv3)));gap:0;box-sizing:border-box}
+.waycraft-mcp-menu[hidden]{display:none}
+/* Installed DSH Menu item geometry, adapted without a private host import. */
+.waycraft-mcp-menu button.waycraft-mcp-icon-btn{display:flex;justify-content:flex-start;gap:6px;inline-size:100%;padding:6px 8px;block-size:auto;min-block-size:34px;border-radius:var(--dsw-radius-md,12px);font-size:13px;line-height:20px;white-space:nowrap;text-align:start}
+.waycraft-mcp-menu button.waycraft-mcp-icon-btn svg{inline-size:14px;block-size:14px;flex:none;color:var(--dsw-alias-menu-icon,var(--dsw-alias-label-secondary))}
+.waycraft-mcp-menu button.waycraft-mcp-icon-btn:focus-visible{background:var(--dsw-alias-interactive-bg-hover);outline:none}
+@media (hover:hover){.waycraft-mcp-menu button.waycraft-mcp-icon-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}}
+@media (hover:hover){.waycraft-mcp-row-head:hover{background:var(--dsw-alias-interactive-bg-hover)}.waycraft-mcp-badge:hover{border-color:var(--dsw-alias-border-l3)}}
+@media (max-width:520px){.waycraft-mcp-dialog-head,.waycraft-mcp-dialog-footer{padding:16px}.waycraft-mcp-dialog-body{padding:16px}.waycraft-mcp-dialog-footer button{flex:1 1 auto}}
+@media (pointer:coarse){.waycraft-mcp input:not([type=checkbox]),.waycraft-mcp textarea,.waycraft-mcp select{font-size:16px}}
 /* ===== Stats ===== */
 .waycraft-mcp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:0.5px solid var(--dsw-alias-settings-card-stroke,var(--dsw-alias-border-l2));border-radius:var(--dsw-radius-xl,20px);background:var(--dsw-alias-settings-card-fill,var(--dsw-alias-bg-layer-2));overflow:hidden}
 .waycraft-mcp-stat{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;text-align:center;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
@@ -916,7 +1000,7 @@ function setupMcp(ctx, fail) {
 
 /* ===== Source card ===== */
 .waycraft-mcp-source{border:0.5px solid var(--dsw-alias-settings-card-stroke,var(--dsw-alias-border-l2));border-radius:var(--dsw-radius-xl,20px);background:var(--dsw-alias-settings-card-fill,var(--dsw-alias-bg-layer-2));overflow:hidden}
-.waycraft-mcp-source>summary{display:flex;align-items:center;gap:8px;min-block-size:44px;padding:8px 16px;cursor:pointer;font-weight:600;list-style:none}
+.waycraft-mcp-source>summary{display:flex;align-items:center;gap:8px;min-block-size:44px;padding:8px 16px;cursor:pointer;font-weight:500;list-style:none}
 .waycraft-mcp-source>summary::-webkit-details-marker{display:none}
 .waycraft-mcp-chev{flex:none;inline-size:6px;block-size:6px;margin-inline:4px;border-inline-end:1.5px solid var(--dsw-alias-label-tertiary);border-block-end:1.5px solid var(--dsw-alias-label-tertiary);transform:rotate(-45deg);transition:transform .2s cubic-bezier(.4,0,.2,1)}
 .waycraft-mcp-source:dir(rtl) .waycraft-mcp-chev{transform:rotate(135deg)}
@@ -1098,6 +1182,19 @@ function setupMcp(ctx, fail) {
 			}
 		};
 		const transportTab = (id, label) => h("button", {
+			onKeyDown: (e) => {
+				if (!isEdit && [
+					"ArrowLeft",
+					"ArrowRight",
+					"Home",
+					"End"
+				].includes(e.key)) {
+					e.preventDefault();
+					const next = e.key === "Home" ? "stdio" : e.key === "End" ? "streamable-http" : id === "stdio" ? "streamable-http" : "stdio";
+					setField("transport", next);
+					e.currentTarget.parentElement?.querySelectorAll?.("button")?.[next === "stdio" ? 0 : 1]?.focus?.();
+				}
+			},
 			type: "button",
 			role: "radio",
 			"aria-checked": f.transport === id,
@@ -1149,7 +1246,10 @@ function setupMcp(ctx, fail) {
 		}, saving ? t("saving") : t("saveServer")));
 		const overlay = h("div", {
 			className: "waycraft-mcp waycraft-mcp-overlay",
-			dir: isArabic() ? "rtl" : "ltr"
+			dir: isArabic() ? "rtl" : "ltr",
+			onMouseDown: (e) => {
+				if (e.target === e.currentTarget) requestClose();
+			}
 		}, h("div", {
 			role: "dialog",
 			"aria-modal": true,
@@ -1158,7 +1258,20 @@ function setupMcp(ctx, fail) {
 			ref,
 			tabIndex: -1,
 			onKeyDown
-		}, h("div", { className: "waycraft-mcp-dialog-head" }, h("h3", { id: "waycraft-mcp-dialog-title" }, isEdit ? t("editTitle") : t("addTitle"))), body, footer));
+		}, h("div", { className: "waycraft-mcp-dialog-head" }, h("h3", { id: "waycraft-mcp-dialog-title" }, isEdit ? t("editTitle") : t("addTitle")), h("button", {
+			type: "button",
+			className: "waycraft-mcp-icon-btn",
+			"aria-label": t("cancel"),
+			onClick: requestClose
+		}, h("svg", {
+			width: 16,
+			height: 16,
+			viewBox: "0 0 24 24",
+			fill: "none",
+			stroke: "currentColor",
+			strokeWidth: 1.5,
+			"aria-hidden": true
+		}, h("path", { d: "M6 6l12 12M18 6L6 18" })))), body, footer));
 		const host = portalTarget();
 		return host ? host.dom.createPortal(overlay, host.body) : overlay;
 	}
@@ -1228,6 +1341,203 @@ function setupMcp(ctx, fail) {
 		const host = portalTarget();
 		return host ? host.dom.createPortal(overlay, host.body) : overlay;
 	}
+	function ImportDialog(props) {
+		const { ref, onKeyDown } = useModal(props.onClose);
+		const node = h("div", {
+			className: "waycraft-mcp waycraft-mcp-overlay",
+			inert: props.suspended ? true : void 0,
+			"aria-hidden": props.suspended || void 0,
+			dir: isArabic() ? "rtl" : "ltr",
+			onMouseDown: (e) => {
+				if (e.target === e.currentTarget) props.onClose();
+			}
+		}, h("div", {
+			role: "dialog",
+			"aria-modal": true,
+			"aria-labelledby": "waycraft-mcp-import-title",
+			className: "waycraft-mcp-dialog",
+			ref,
+			tabIndex: -1,
+			onKeyDown
+		}, h("div", { className: "waycraft-mcp-dialog-head" }, h("h3", { id: "waycraft-mcp-import-title" }, t("importTitle")), h("button", {
+			type: "button",
+			className: "waycraft-mcp-icon-btn",
+			"aria-label": t("cancel"),
+			onClick: props.onClose
+		}, "×")), h("div", { className: "waycraft-mcp-dialog-body" }, props.children)));
+		const host = portalTarget();
+		return host ? host.dom.createPortal(node, host.body) : node;
+	}
+	function NativeMoreMenu(props) {
+		const [open, setOpen] = React.useState(false);
+		const trigger = React.useRef(null);
+		const close = () => {
+			setOpen(false);
+			trigger.current?.focus?.({ preventScroll: true });
+		};
+		const actions = React.Children.toArray(props.children).filter(Boolean);
+		const anchor = tooltip(props.label, h("button", {
+			ref: trigger,
+			type: "button",
+			className: "waycraft-mcp-icon-btn",
+			"aria-label": props.label,
+			"aria-haspopup": "menu",
+			"aria-expanded": open,
+			disabled: props.disabled,
+			onClick: () => setOpen(!open),
+			onKeyDown: (e) => {
+				if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+					e.preventDefault();
+					setOpen(true);
+				}
+			}
+		}, h("svg", {
+			viewBox: "0 0 24 24",
+			width: 16,
+			height: 16,
+			fill: "currentColor",
+			"aria-hidden": true
+		}, [
+			5,
+			12,
+			19
+		].map((x) => h("circle", {
+			key: x,
+			cx: x,
+			cy: 12,
+			r: 1.5
+		})))));
+		return h(primitives.Menu, {
+			open,
+			anchor,
+			onClose: close,
+			align: "end",
+			portal: true,
+			autoFocus: true,
+			items: actions.map((child, i) => ({
+				id: String(i),
+				label: child.props["aria-label"],
+				icon: child.props.children,
+				disabled: child.props.disabled,
+				danger: String(child.props.className || "").includes("danger")
+			})),
+			onSelect: (id) => {
+				close();
+				actions[Number(id)]?.props.onClick();
+			}
+		});
+	}
+	function MoreMenu(props) {
+		return primitives.Menu ? h(NativeMoreMenu, props) : h(FallbackMoreMenu, props);
+	}
+	function FallbackMoreMenu(props) {
+		const trigger = React.useRef(null);
+		const menu = React.useRef(null);
+		const [open, setOpen] = React.useState(false);
+		const [pos, setPos] = React.useState({
+			top: 0,
+			left: 0
+		});
+		const close = (focus) => {
+			setOpen(false);
+			if (focus) trigger.current?.focus?.();
+		};
+		React.useEffect(() => {
+			if (!open || typeof document === "undefined") return;
+			const place = () => {
+				const r = trigger.current?.getBoundingClientRect();
+				const m = menu.current;
+				if (!r || !m) return;
+				const w = document.documentElement.clientWidth, v = document.documentElement.clientHeight;
+				const top = r.bottom + 4 + m.offsetHeight <= v - 8 ? r.bottom + 4 : r.top - m.offsetHeight - 4;
+				setPos({
+					top: Math.max(8, Math.min(top, v - m.offsetHeight - 8)),
+					left: Math.max(8, Math.min(isArabic() ? r.left : r.right - m.offsetWidth, w - m.offsetWidth - 8))
+				});
+			};
+			place();
+			menu.current?.querySelector?.("button:not([disabled])")?.focus?.();
+			const away = (e) => {
+				if (!menu.current?.contains(e.target) && !trigger.current?.contains(e.target)) close(false);
+			};
+			document.addEventListener("pointerdown", away, true);
+			document.addEventListener("scroll", place, true);
+			globalThis.addEventListener?.("resize", place);
+			return () => {
+				document.removeEventListener("pointerdown", away, true);
+				document.removeEventListener("scroll", place, true);
+				globalThis.removeEventListener?.("resize", place);
+			};
+		}, [open]);
+		const list = h("div", {
+			ref: menu,
+			role: "menu",
+			hidden: !open,
+			className: "waycraft-mcp waycraft-mcp-menu",
+			dir: isArabic() ? "rtl" : "ltr",
+			style: pos,
+			onBlur: (e) => {
+				if (e.relatedTarget && !menu.current?.contains(e.relatedTarget) && !trigger.current?.contains(e.relatedTarget)) close(false);
+			},
+			onKeyDown: (e) => {
+				if (e.key === "Escape") {
+					e.preventDefault();
+					e.stopPropagation();
+					close(true);
+				}
+				if ([
+					"ArrowDown",
+					"ArrowUp",
+					"Home",
+					"End"
+				].includes(e.key)) {
+					e.preventDefault();
+					const items = Array.from(menu.current?.querySelectorAll("button:not([disabled])") || []);
+					const at = items.indexOf(document.activeElement);
+					items[e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+				}
+			}
+		}, React.Children.map(props.children, (child) => child ? React.cloneElement(child, {
+			role: "menuitem",
+			onClick: () => {
+				close(true);
+				child.props.onClick();
+			}
+		}, child.props.children, child.props["aria-label"]) : null));
+		const host = portalTarget();
+		return h(React.Fragment, null, h("button", {
+			ref: trigger,
+			type: "button",
+			className: "waycraft-mcp-icon-btn",
+			"aria-label": props.label,
+			title: props.label,
+			"aria-haspopup": "menu",
+			"aria-expanded": open,
+			disabled: props.disabled,
+			onClick: () => setOpen(!open),
+			onKeyDown: (e) => {
+				if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+					e.preventDefault();
+					setOpen(true);
+				}
+			}
+		}, h("svg", {
+			viewBox: "0 0 24 24",
+			width: 16,
+			height: 16,
+			fill: "currentColor",
+			"aria-hidden": true
+		}, [
+			5,
+			12,
+			19
+		].map((x) => h("circle", {
+			key: x,
+			cx: x,
+			cy: 12,
+			r: 1.5
+		})))), open || !host ? host ? host.dom.createPortal(list, host.body) : list : null);
+	}
 	function Toast(props) {
 		const { notice, onDismiss } = props;
 		React.useEffect(() => {
@@ -1236,6 +1546,12 @@ function setupMcp(ctx, fail) {
 			return () => clearTimeout(id);
 		}, [notice]);
 		if (!notice) return null;
+		if (primitives.Toast && notice.kind !== "err") return h(primitives.Toast, {
+			text: notice.text,
+			tone: notice.kind === "warn" ? void 0 : "success",
+			holdMs: notice.kind === "warn" ? 9e3 : 5e3,
+			onDone: onDismiss
+		});
 		const kind = notice.kind === "err" ? "err" : notice.kind === "warn" ? "warn" : "ok";
 		const glyph = kind === "ok" ? h("svg", {
 			viewBox: "0 0 24 24",
@@ -1355,6 +1671,17 @@ function setupMcp(ctx, fail) {
 			}
 		};
 		const [importText, setImportText] = React.useState("");
+		const [importOpen, setImportOpen] = React.useState(false);
+		const [importFileName, setImportFileName] = React.useState("");
+		const importRead = React.useRef(0);
+		const toolsReadGeneration = React.useRef(0);
+		const [importReading, setImportReading] = React.useState(false);
+		const [toolsRetry, setToolsRetry] = React.useState(0);
+		const [toolsRead, setToolsRead] = React.useState({
+			key: "",
+			loading: false,
+			error: false
+		});
 		const [importPreview, setImportPreview] = React.useState(null);
 		const [importApprovals, setImportApprovals] = React.useState({});
 		const [importResult, setImportResult] = React.useState(null);
@@ -1367,7 +1694,23 @@ function setupMcp(ctx, fail) {
 			try {
 				const data = await rpc("list");
 				if (!alive.current) return;
-				setServers(Array.isArray(data.servers) ? data.servers : []);
+				const loadedServers = Array.isArray(data.servers) ? data.servers : [];
+				setServers(loadedServers);
+				setTestResults((previous) => {
+					const results = {};
+					for (const server of loadedServers) {
+						const config = configIdentity(server);
+						const check = data.connectionChecks?.[server.serverName];
+						if (check && typeof check.ok === "boolean" && check.configFingerprint === config && typeof check.checkedAt === "string" && Number.isFinite(Date.parse(check.checkedAt))) results[server.serverName] = {
+							ok: check.ok,
+							message: "",
+							config,
+							checkedAt: check.checkedAt
+						};
+						else if (!data.connectionChecks && previous[server.serverName]?.config === config) results[server.serverName] = previous[server.serverName];
+					}
+					return results;
+				});
 				setTrashed(Array.isArray(data.trashedServers) ? data.trashedServers : []);
 				setFingerprint(data.fingerprint || "");
 				setState({ kind: "ready" });
@@ -1425,7 +1768,111 @@ function setupMcp(ctx, fail) {
 			return true;
 		};
 		const visibleServers = servers.filter(matches);
-		servers.find((s) => s.serverName === selected) || visibleServers[0] || trashed.find((s) => s.serverName === selected);
+		const current = servers.find((s) => s.serverName === selected) || visibleServers[0] || trashed.find((s) => s.serverName === selected) || null;
+		const toolsKey = current ? `${current.serverName}:${configIdentity(current)}` : "";
+		React.useEffect(() => {
+			if (state.kind !== "ready" || area !== "servers" || tab !== "tools" || !current || current.trash?.trashed) return;
+			let cancelled = false;
+			const generation = ++toolsReadGeneration.current;
+			const name = current.serverName;
+			setToolsRead({
+				key: toolsKey,
+				loading: true,
+				error: false
+			});
+			setToolCache((previous) => {
+				const next = { ...previous };
+				delete next[name];
+				return next;
+			});
+			rpc("list_tools", { serverName: name }).then((data) => {
+				if (cancelled || generation !== toolsReadGeneration.current) return;
+				setToolCache((previous) => ({
+					...previous,
+					[name]: data
+				}));
+				setToolsRead({
+					key: toolsKey,
+					loading: false,
+					error: false
+				});
+			}, () => {
+				if (!cancelled && generation === toolsReadGeneration.current) setToolsRead({
+					key: toolsKey,
+					loading: false,
+					error: true
+				});
+			});
+			return () => {
+				cancelled = true;
+			};
+		}, [
+			state.kind,
+			area,
+			tab,
+			toolsKey,
+			toolsRetry
+		]);
+		const changeImport = (text) => {
+			importRead.current++;
+			setImportReading(false);
+			setImportText(text);
+			setImportPreview(null);
+			setImportApprovals({});
+			setImportResult(null);
+			setImportFileName("");
+		};
+		const readImportFiles = async (files) => {
+			const ticket = ++importRead.current;
+			setImportReading(false);
+			setImportText("");
+			setImportPreview(null);
+			setImportApprovals({});
+			setImportResult(null);
+			setImportFileName("");
+			const file = files?.[0];
+			if (files?.length !== 1 || !file || !/\.json$/i.test(file.name || "") || file.size > 24 * 1024) {
+				setNotice({
+					kind: "err",
+					text: t("importFileError")
+				});
+				return;
+			}
+			setImportReading(true);
+			try {
+				const text = await file.text();
+				if (!alive.current || ticket !== importRead.current) return;
+				if (new TextEncoder().encode(text).length > 24 * 1024) throw new Error(t("importFileError"));
+				JSON.parse(text);
+				setImportText(text);
+				setImportFileName(file.name);
+				setNotice(null);
+			} catch {
+				if (alive.current && ticket === importRead.current) setNotice({
+					kind: "err",
+					text: t("importFileError")
+				});
+			} finally {
+				if (alive.current && ticket === importRead.current) setImportReading(false);
+			}
+		};
+		const closeImport = () => {
+			if (busy) return;
+			const close = () => {
+				importRead.current++;
+				setImportOpen(false);
+				changeImport("");
+			};
+			if (importText || importPreview) setConfirmState({
+				title: t("importTitle"),
+				label: t("importDiscard"),
+				fn: async () => {
+					close();
+					return {};
+				}
+			});
+			else close();
+		};
 		if (state.kind === "loading") return h("div", {
 			className: "waycraft-mcp",
 			dir: isArabic() ? "rtl" : "ltr"
@@ -1589,25 +2036,54 @@ function setupMcp(ctx, fail) {
 		const importArea = h("section", {
 			"aria-label": t("importTitle"),
 			className: "waycraft-mcp-card"
-		}, h("div", { className: "waycraft-mcp-card-body" }, h("strong", null, t("importTitle")), h("p", { className: "waycraft-mcp-note" }, t("importNote")), h("label", null, t("importJson"), h("textarea", {
+		}, h("div", { className: "waycraft-mcp-card-body" }, notice?.kind === "err" ? h("p", {
+			role: "alert",
+			className: "waycraft-mcp-alert"
+		}, notice.text) : null, h("p", { className: "waycraft-mcp-note" }, t("importNote")), h("p", { className: "waycraft-mcp-note" }, t("importFormats")), h("div", {
+			className: "waycraft-mcp-dropzone",
+			onDragOver: (e) => e.preventDefault(),
+			onDrop: (e) => {
+				e.preventDefault();
+				if (!busy) readImportFiles(e.dataTransfer?.files);
+			}
+		}, h("p", null, t("importDrop")), h("label", { className: "waycraft-mcp-file-choice" }, t("importFile"), h("input", {
+			"aria-label": t("importFile"),
+			type: "file",
+			accept: ".json,application/json",
+			disabled: !!busy,
+			onChange: (e) => {
+				readImportFiles(e.target.files);
+				e.target.value = "";
+			}
+		})), importFileName ? h("p", { role: "status" }, ltr(importFileName)) : null), h("label", null, t("importJson"), h("textarea", {
 			value: importText,
-			onInput: (e) => {
-				setImportText(e.target.value);
-				setImportPreview(null);
-				setImportResult(null);
-			},
+			disabled: !!busy,
+			onInput: (e) => changeImport(e.target.value),
 			rows: 6,
 			spellCheck: false,
-			className: "waycraft-mcp-mono"
+			className: "waycraft-mcp-mono",
+			dir: "ltr"
 		})), h("div", { className: "waycraft-mcp-row" }, h("button", {
 			type: "button",
-			disabled: !!busy,
+			disabled: !!busy || importReading,
 			onClick: () => void run("import-preview", async () => {
+				const generation = importRead.current;
+				setImportPreview(null);
+				setImportApprovals({});
+				setImportResult(null);
+				if (new TextEncoder().encode(importText).length > 24 * 1024) throw new Error(t("importFileError"));
 				let input = importText;
 				try {
 					input = JSON.parse(importText);
 				} catch {}
-				const d = await rpc("import_preview", { input });
+				let d;
+				try {
+					d = await rpc("import_preview", { input });
+				} catch (error) {
+					if (!alive.current || generation !== importRead.current) return;
+					throw error;
+				}
+				if (!alive.current || generation !== importRead.current) return;
 				setImportPreview(d.preview || d);
 				setImportApprovals({});
 				setImportResult(null);
@@ -1673,7 +2149,17 @@ function setupMcp(ctx, fail) {
 			className: "waycraft-mcp-switch-thumb",
 			"aria-hidden": "true"
 		}));
+		function configIdentity(s) {
+			return String(s?.reviewedConfigFingerprint || JSON.stringify(s?.config || {}));
+		}
 		const runTest = (serverName) => run("test", async () => {
+			toolsReadGeneration.current++;
+			setToolsRead({
+				key: toolsKey,
+				loading: false,
+				error: false
+			});
+			const config = configIdentity(servers.find((s) => s.serverName === serverName));
 			try {
 				const d = await rpc("test_connection", {
 					serverName,
@@ -1683,7 +2169,8 @@ function setupMcp(ctx, fail) {
 					...m,
 					[serverName]: {
 						ok: !!d.test?.ok,
-						message: String(d.test?.message || "")
+						message: String(d.test?.message || ""),
+						config
 					}
 				}));
 				if (d.toolCache) setToolCache((m) => ({
@@ -1698,7 +2185,8 @@ function setupMcp(ctx, fail) {
 						...m,
 						[serverName]: {
 							ok: false,
-							message: msg
+							message: msg,
+							config
 						}
 					}));
 					if (e.data.toolCache) setToolCache((m) => ({
@@ -1710,29 +2198,36 @@ function setupMcp(ctx, fail) {
 				throw e;
 			}
 		});
-		const testBadge = (serverName) => {
-			const r = testResults[serverName];
-			return r ? r.ok ? t("testPassed") : t("testFailed") : t("testBadgeNever");
+		const connectionStatus = (s) => {
+			if (s.disabled) return ["off", "connectionOff"];
+			if (trustOf(s.trust) !== "trusted") return ["warning", "connectionReview"];
+			const result = testResults[s.serverName];
+			if (result && result.config === configIdentity(s)) return result.ok ? ["success", "connectionPassed"] : ["error", "connectionFailed"];
+			return ["unknown", "connectionUnknown"];
 		};
 		const openEdit = (server) => setForm({
 			key: server.serverName,
 			initial: formFromServer(server),
 			original: server
 		});
-		const icon = (path) => h("svg", {
-			viewBox: "0 0 24 24",
+		const icon = (path, viewBox = "0 0 24 24") => h("svg", {
+			viewBox,
 			width: 16,
 			height: 16,
-			fill: "currentColor",
+			fill: "none",
+			stroke: "currentColor",
+			strokeWidth: 1.5,
+			strokeLinecap: "round",
+			strokeLinejoin: "round",
 			"aria-hidden": "true"
 		}, h("path", { d: path }));
 		const ICON = {
-			servers: "M20 13H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM20 3H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1zM7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z",
-			search: "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z",
-			trash: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
-			edit: "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 0 0 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z",
+			servers: "M4 3h16v7H4zM4 14h16v7H4zM7 6.5h.01M7 17.5h.01",
+			search: "M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
+			trash: "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7",
+			edit: "M16 3l5 5M3 21l5-1L21 7l-4-4L4 16z",
 			test: "M8 5v14l11-7z",
-			trust: "M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"
+			trust: "M12 3l8 4v5c0 5-8 9-8 9s-8-4-8-9V7zM8 12l3 3 5-6"
 		};
 		const iconAct = (labelKey, path, onClick, cls) => h("button", {
 			type: "button",
@@ -1748,11 +2243,11 @@ function setupMcp(ctx, fail) {
 			const headBadges = [s.trash?.trashed ? h("span", {
 				key: "tr",
 				className: "waycraft-mcp-badge waycraft-mcp-badge-warn"
-			}, t("filterTrashed")) : null, !inTrash ? h("span", {
-				key: "tb",
-				className: "waycraft-mcp-badge" + (needsTrust ? " waycraft-mcp-badge-warn" : "")
-			}, needsTrust ? t("trustBadgeUntrusted") : t("trustBadgeTrusted")) : null];
-			const title = h("span", { className: "waycraft-mcp-row-title" }, h("strong", null, ltr(s.serverName)), h("span", { className: "waycraft-mcp-row-sub" }, ltr(s.config?.transport), " · ", ownershipLabel(s.ownership)));
+			}, t("filterTrashed")) : null];
+			const [status, statusKey] = connectionStatus(s);
+			const lastCheck = testResults[s.serverName];
+			const statusTitle = [t(statusKey), lastCheck?.config === configIdentity(s) ? checkedAtLabel(lastCheck.checkedAt) : ""].filter(Boolean).join(" · ");
+			const title = h("span", { className: "waycraft-mcp-row-title" }, h("strong", null, ltr(s.serverName)));
 			return h("article", {
 				key: s.serverName,
 				className: "waycraft-mcp-card" + (open ? " is-open" : ""),
@@ -1760,7 +2255,12 @@ function setupMcp(ctx, fail) {
 			}, h("div", {
 				className: "waycraft-mcp-row-head",
 				"data-off": s.disabled ? "" : void 0
-			}, inTrash ? h("div", { className: "waycraft-mcp-row-toggle" }, title) : h("button", {
+			}, !inTrash ? h("span", {
+				className: `waycraft-mcp-status waycraft-mcp-status-${status}`,
+				role: "img",
+				"aria-label": statusTitle,
+				title: statusTitle
+			}) : null, inTrash ? h("div", { className: "waycraft-mcp-row-toggle" }, title) : h("button", {
 				type: "button",
 				className: "waycraft-mcp-row-toggle",
 				"aria-expanded": open,
@@ -1768,10 +2268,10 @@ function setupMcp(ctx, fail) {
 					setSelected(open ? null : s.serverName);
 					setTab("overview");
 				}
-			}, h("span", {
-				className: "waycraft-mcp-chev",
-				"aria-hidden": "true"
-			}), title), ...headBadges, inTrash ? h(React.Fragment, null, h("button", {
+			}, title), !inTrash && needsTrust ? h("span", {
+				className: "waycraft-mcp-badge waycraft-mcp-badge-warn",
+				title: trustLabel(s.trust)
+			}, icon("M12 3L2 21h20zM12 9v5M12 17h.01"), t("trustBadgeUntrusted")) : null, h("span", { className: "waycraft-mcp-row-sub" }, ltr(s.config?.transport), " · ", ownershipLabel(s.ownership)), ...headBadges, inTrash ? h(React.Fragment, null, h("button", {
 				type: "button",
 				disabled: !!busy,
 				onClick: () => setConfirmState({
@@ -1800,7 +2300,10 @@ function setupMcp(ctx, fail) {
 						confirm: true
 					})
 				})
-			}, t("permanentDelete"))) : h(React.Fragment, null, testResults[s.serverName] ? h("span", { className: "waycraft-mcp-badge" + (testResults[s.serverName].ok ? "" : " waycraft-mcp-badge-warn") }, testBadge(s.serverName)) : null, h("span", { className: "waycraft-mcp-row-actions" }, iconAct("testConnection", ICON.test, () => void runTest(s.serverName)), iconAct("editServer", ICON.edit, () => openEdit(s)), needsTrust ? iconAct("approveTrust", ICON.trust, () => void run("trust", () => rpc("approve_trust", {
+			}, t("permanentDelete"))) : h(React.Fragment, null, h("span", { className: "waycraft-mcp-row-actions" }, h(MoreMenu, {
+				label: `${t("more")}: ${s.serverName}`,
+				disabled: !!busy
+			}, iconAct("testConnection", ICON.test, () => void runTest(s.serverName)), iconAct("editServer", ICON.edit, () => openEdit(s)), needsTrust ? iconAct("approveTrust", ICON.trust, () => void run("trust", () => rpc("approve_trust", {
 				serverName: s.serverName,
 				reviewedConfigFingerprint: s.reviewedConfigFingerprint,
 				expectedFingerprint: fingerprint
@@ -1814,7 +2317,7 @@ function setupMcp(ctx, fail) {
 					serverName: s.serverName,
 					expectedFingerprint: fingerprint
 				})
-			}), "waycraft-mcp-danger")), switchControl({
+			}), "waycraft-mcp-danger"))), switchControl({
 				checked: !s.disabled,
 				disabled: !!busy,
 				label: `${t("configEnabled")}: ${s.serverName}`,
@@ -1825,9 +2328,21 @@ function setupMcp(ctx, fail) {
 					patch: { disabled: !s.disabled }
 				})),
 				bare: true
-			}))), open ? h("div", { className: "waycraft-mcp-card-body" }, detailBody(s)) : null);
+			}), h("button", {
+				type: "button",
+				className: "waycraft-mcp-icon-btn waycraft-mcp-expand",
+				"aria-label": s.serverName,
+				"aria-expanded": open,
+				onClick: () => {
+					setSelected(open ? null : s.serverName);
+					setTab("overview");
+				}
+			}, h("span", {
+				className: "waycraft-mcp-chev",
+				"aria-hidden": "true"
+			})))), open ? h("div", { className: "waycraft-mcp-card-body" }, detailBody(s)) : null);
 		};
-		const detailBody = (current) => h("div", {
+		const detailBody = (current$1) => h("div", {
 			className: "waycraft-mcp-detail",
 			"aria-label": t("tabs")
 		}, h("div", {
@@ -1849,36 +2364,34 @@ function setupMcp(ctx, fail) {
 		}, t(id === "security" ? "security" : id)))), tab === "overview" ? h("div", {
 			role: "tabpanel",
 			className: "waycraft-mcp-panel"
-		}, h("dl", { className: "waycraft-mcp-kv" }, h("dt", null, t("status")), h("dd", null, statusLabel(current)), h("dt", null, t("trustState")), h("dd", null, trustLabel(current.trust)), h("dt", null, t("transport")), h("dd", null, ltr(current.config?.transport)), h("dt", null, t("savedState")), h("dd", null, savedLabel(current)), h("dt", null, t("runtimeState")), h("dd", null, t("statusRestart")), h("dt", null, t("testOutcome")), h("dd", null, testLabel(testResults[current.serverName])))) : null, tab === "tools" ? h("div", {
+		}, h("dl", { className: "waycraft-mcp-kv" }, h("dt", null, t("status")), h("dd", null, statusLabel(current$1)), h("dt", null, t("trustState")), h("dd", null, trustLabel(current$1.trust)), h("dt", null, t("transport")), h("dd", null, ltr(current$1.config?.transport)), h("dt", null, t("savedState")), h("dd", null, savedLabel(current$1)), h("dt", null, t("runtimeState")), h("dd", null, t("statusRestart")), h("dt", null, t("testOutcome")), h("dd", null, testLabel(testResults[current$1.serverName]?.config === configIdentity(current$1) ? testResults[current$1.serverName] : void 0)))) : null, tab === "tools" ? h("div", {
 			role: "tabpanel",
 			className: "waycraft-mcp-panel"
-		}, h("p", { className: "waycraft-mcp-note" }, t("readOnlyTools")), h("div", { className: "waycraft-mcp-row" }, h("button", {
+		}, h("p", { className: "waycraft-mcp-note" }, t("readOnlyTools")), h("div", { className: "waycraft-mcp-row" }, toolsRead.error && toolsRead.key === toolsKey ? h("button", {
 			type: "button",
-			disabled: !!busy || !!current.trash?.trashed,
-			onClick: () => void run("tools", async () => {
-				const d = await rpc("list_tools", { serverName: current.serverName });
-				setToolCache((m) => ({
-					...m,
-					[current.serverName]: d
-				}));
-				return d;
-			})
-		}, t("listTools")), h("button", {
+			onClick: () => setToolsRetry((n) => n + 1)
+		}, t("retry")) : null, toolsRead.key !== toolsKey || toolsRead.loading ? h("span", { role: "status" }, t("loading")) : null, toolsRead.key === toolsKey && toolsRead.error ? h("p", { role: "alert" }, t("toolsReadError")) : null, h("button", {
 			type: "button",
-			disabled: !!busy || !!current.trash?.trashed,
+			disabled: !!busy || !!current$1.trash?.trashed,
 			onClick: () => void run("refresh", async () => {
+				const generation = ++toolsReadGeneration.current;
+				setToolsRead({
+					key: toolsKey,
+					loading: false,
+					error: false
+				});
 				const d = await rpc("refresh_tools", {
-					serverName: current.serverName,
+					serverName: current$1.serverName,
 					expectedFingerprint: fingerprint
 				});
-				setToolCache((m) => ({
+				if (alive.current && generation === toolsReadGeneration.current) setToolCache((m) => ({
 					...m,
-					[current.serverName]: d
+					[current$1.serverName]: d
 				}));
 				return d;
 			})
 		}, t("refreshTools"))), (() => {
-			const tc = toolCache[current.serverName];
+			const tc = toolCache[current$1.serverName];
 			const tools = tc?.tools || tc?.cache?.tools || [];
 			if (!tc) return h("p", { className: "waycraft-mcp-note" }, t("toolsNever"));
 			if (!tools.length) return h("p", { className: "waycraft-mcp-note" }, t("noTools"));
@@ -1886,16 +2399,16 @@ function setupMcp(ctx, fail) {
 		})()) : null, tab === "configuration" ? h("div", {
 			role: "tabpanel",
 			className: "waycraft-mcp-panel"
-		}, h("pre", { className: "waycraft-mcp-pre" }, JSON.stringify(current.config || {}, null, 2)), current.limitation || current.trash?.limitation ? h("p", {
+		}, h("pre", { className: "waycraft-mcp-pre" }, JSON.stringify(current$1.config || {}, null, 2)), current$1.limitation || current$1.trash?.limitation ? h("p", {
 			role: "status",
 			className: "waycraft-mcp-note"
-		}, t("limitation"), ": ", current.limitation || current.trash?.limitation) : null) : null, tab === "security" ? h("div", {
+		}, t("limitation"), ": ", current$1.limitation || current$1.trash?.limitation) : null) : null, tab === "security" ? h("div", {
 			role: "tabpanel",
 			className: "waycraft-mcp-panel"
-		}, h("dl", { className: "waycraft-mcp-kv" }, h("dt", null, t("trustState")), h("dd", null, trustLabel(current.trust)), h("dt", null, t("fingerprint")), h("dd", null, ltr(current.reviewedConfigFingerprint || current.trust?.reviewedFingerprint || "")), h("dt", null, t("ownership")), h("dd", null, ownershipLabel(current.ownership))), current.trash?.trashed ? h("p", { className: "waycraft-mcp-note" }, t("trashedAt"), ": ", ltr(current.trash.trashedAt || "")) : null, current.trash?.limitation ? h("p", {
+		}, h("dl", { className: "waycraft-mcp-kv" }, h("dt", null, t("trustState")), h("dd", null, trustLabel(current$1.trust)), h("dt", null, t("fingerprint")), h("dd", null, ltr(current$1.reviewedConfigFingerprint || current$1.trust?.reviewedFingerprint || "")), h("dt", null, t("ownership")), h("dd", null, ownershipLabel(current$1.ownership))), current$1.trash?.trashed ? h("p", { className: "waycraft-mcp-note" }, t("trashedAt"), ": ", ltr(current$1.trash.trashedAt || "")) : null, current$1.trash?.limitation ? h("p", {
 			role: "status",
 			className: "waycraft-mcp-note"
-		}, t("limitation"), ": ", current.trash.limitation) : null) : null);
+		}, t("limitation"), ": ", current$1.trash.limitation) : null) : null);
 		const trustedCount = servers.filter((x) => trustOf(x.trust) === "trusted").length;
 		const needsCount = servers.filter((x) => ["untrusted", "invalidated"].includes(trustOf(x.trust))).length;
 		const offCount = servers.filter((x) => x.disabled).length;
@@ -1940,14 +2453,14 @@ function setupMcp(ctx, fail) {
 			placeholder: t("search"),
 			value: query,
 			onInput: (e) => setQuery(e.target.value)
-		}), h("div", { className: "waycraft-mcp-iconbar" }, h("button", {
+		}), h("div", { className: "waycraft-mcp-iconbar" }, tooltip(t("refreshAria"), h("button", {
 			type: "button",
 			className: "waycraft-mcp-icon-btn",
 			"aria-label": t("refreshAria"),
 			disabled: !!busy,
 			onClick: load,
 			title: t("refresh")
-		}, icon("M17.65 6.35A7.958 7.958 0 0 1 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 0 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z")), h("button", {
+		}, icon("M13 8a5 5 0 1 1-1.5-3.5M13 2.5v3h-3", "0 0 16 16"))), tooltip(t("addServer"), h("button", {
 			type: "button",
 			className: "waycraft-mcp-icon-btn",
 			"aria-label": t("addServer"),
@@ -1958,7 +2471,13 @@ function setupMcp(ctx, fail) {
 				original: null
 			}),
 			title: t("addServer")
-		}, icon("M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z")))), stats, h("ul", {
+		}, icon("M8 3v10M3 8h10", "0 0 16 16"))), tooltip(t("importTitle"), h("button", {
+			type: "button",
+			className: "waycraft-mcp-icon-btn",
+			"aria-label": t("importTitle"),
+			disabled: !!busy,
+			onClick: () => setImportOpen(true)
+		}, icon("M8 2v8M5 7l3 3 3-3M3 11v3h10v-3", "0 0 16 16"))))), stats, h("ul", {
 			className: "waycraft-mcp-list",
 			"aria-label": t("serverList")
 		}, visibleServers.length ? visibleServers.map((x) => h("li", { key: x.serverName }, serverRow(x, false))) : h("li", { className: "waycraft-mcp-note" }, t("empty"))));
@@ -1973,7 +2492,7 @@ function setupMcp(ctx, fail) {
 		}, h("style", null, STYLE), h("div", { className: "waycraft-mcp-header" }, h("h2", { className: "waycraft-mcp-title" }, t("title"))), h(Toast, {
 			notice,
 			onDismiss: () => setNotice(null)
-		}), confirmUi, h("div", {
+		}), h("div", {
 			className: "waycraft-mcp-seg",
 			role: "tablist",
 			"aria-label": t("title")
@@ -2012,7 +2531,13 @@ function setupMcp(ctx, fail) {
 					});
 				});
 			}
-		}) : null, area === "discover" ? h("div", { className: "waycraft-mcp-stack" }, registryArea, h("details", null, h("summary", null, t("discoverTitle")), discoveryArea), importArea) : null, area === "trash" ? trashArea : null);
+		}) : null, importOpen ? h(ImportDialog, {
+			onClose: closeImport,
+			suspended: !!confirm
+		}, importArea) : null, area === "discover" ? h("div", { className: "waycraft-mcp-stack" }, registryArea, h("details", null, h("summary", null, t("discoverTitle")), discoveryArea), h("button", {
+			type: "button",
+			onClick: () => setImportOpen(true)
+		}, t("importTitle"))) : null, area === "trash" ? trashArea : null, confirmUi);
 	}
 	effect(() => {
 		let off;

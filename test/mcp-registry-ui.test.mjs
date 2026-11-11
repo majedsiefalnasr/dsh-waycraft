@@ -10,25 +10,122 @@ const { act } = Renderer;
 test('Official Registry discovery searches on demand and reviews configuration without automatic addition', async () => {
   const calls = [];
   const exports = {};
-  const js = ts.transpileModule(readFileSync('src/mcp-browser.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  vm.runInNewContext(js, { exports, module: { exports }, require: (id) => { if (id === 'react') return React; throw Error(id); }, console, Response, Headers, AbortController, setTimeout, clearTimeout, fetch: async (_url, options) => {
-    const body = JSON.parse(options.body); calls.push(body);
-    return Response.json(body.action === 'registry_search' ? { ok: true, registry: { servers: [{ name: 'org.example/demo', description: 'Registry demo', version: '1.0', remotes: [{ type: 'streamable-http', url: 'https://example.com/mcp', headers: [] }] }], nextCursor: 'next' } } : { ok: true, servers: [], trashedServers: [], fingerprint: 'fp' });
-  } });
-  let Component; let dictionaries;
-  const ctx = { inject: (_names, fn) => fn(ctx), effect: fn => fn(), slots: { inject: (_name, fn) => fn(), register: (_spec, component) => { Component = component; return () => {}; } }, locale: { register: (_ns, d) => { dictionaries = d; }, bind: () => key => dictionaries.en[key] || key, language: { getSnapshot: () => 'en' } } };
+  const js = ts.transpileModule(readFileSync('src/mcp-browser.ts', 'utf8'), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+  vm.runInNewContext(js, {
+    exports,
+    module: { exports },
+    require: (id) => {
+      if (id === 'react') return React;
+      throw Error(id);
+    },
+    console,
+    Response,
+    Headers,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    fetch: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push(body);
+      return Response.json(
+        body.action === 'registry_search'
+          ? {
+              ok: true,
+              registry: {
+                servers: [
+                  {
+                    name: 'org.example/demo',
+                    description: 'Registry demo',
+                    version: '1.0',
+                    remotes: [
+                      {
+                        type: 'streamable-http',
+                        url: 'https://example.com/mcp',
+                        headers: [],
+                      },
+                    ],
+                  },
+                ],
+                nextCursor: 'next',
+              },
+            }
+          : { ok: true, servers: [], trashedServers: [], fingerprint: 'fp' },
+      );
+    },
+  });
+  let Component;
+  let dictionaries;
+  const ctx = {
+    inject: (_names, fn) => fn(ctx),
+    effect: (fn) => fn(),
+    slots: {
+      inject: (_name, fn) => fn(),
+      register: (_spec, component) => {
+        Component = component;
+        return () => {};
+      },
+    },
+    locale: {
+      register: (_ns, d) => {
+        dictionaries = d;
+      },
+      bind: () => (key) => dictionaries.en[key] || key,
+      language: { getSnapshot: () => 'en' },
+    },
+  };
   exports.applyMcp(ctx);
-  await act(async () => { for (let i = 0; i < 6; i++) await new Promise(r => setTimeout(r, 0)); });
+  await act(async () => {
+    for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
+  });
   let renderer;
-  await act(async () => { renderer = Renderer.create(React.createElement(Component)); });
-  const button = label => renderer.root.findAllByType('button').find(b => b.props['aria-label'] === label || b.children.join('') === label);
-  await act(async () => { renderer.root.findAllByProps({ role: 'tab' }).find(b => b.props['aria-selected'] === false && JSON.stringify(b.children.map(c => typeof c === 'string' ? c : '')).includes('Discover')).props.onClick(); });
-  assert.equal(calls.filter(c => c.action === 'registry_search').length, 0);
-  await act(async () => { button('Search Registry').props.onClick({ preventDefault() {} }); });
-  assert.equal(calls.filter(c => c.action === 'registry_search').length, 1);
-  await act(async () => { button('Details').props.onClick(); });
-  await act(async () => { button('Review configuration').props.onClick(); });
+  await act(async () => {
+    renderer = Renderer.create(React.createElement(Component));
+  });
+  const button = (label) =>
+    renderer.root
+      .findAllByType('button')
+      .find(
+        (b) => b.props['aria-label'] === label || b.children.join('') === label,
+      );
+  await act(async () => {
+    renderer.root
+      .findAllByProps({ role: 'tab' })
+      .find(
+        (b) =>
+          b.props['aria-selected'] === false &&
+          JSON.stringify(
+            b.children.map((c) => (typeof c === 'string' ? c : '')),
+          ).includes('Discover'),
+      )
+      .props.onClick();
+  });
+  assert.equal(calls.filter((c) => c.action === 'registry_search').length, 0);
+  await act(async () => {
+    button('Search Registry').props.onClick({ preventDefault() {} });
+  });
+  assert.equal(calls.filter((c) => c.action === 'registry_search').length, 1);
+  await act(async () => {
+    button('Details').props.onClick();
+  });
+  await act(async () => {
+    button('Review configuration').props.onClick();
+  });
   assert.match(JSON.stringify(renderer.toJSON()), /https:\/\/example.com\/mcp/);
-  assert.equal(calls.some(c => ['create', 'import_register', 'test_connection', 'approve_trust'].includes(c.action)), false);
+  assert.equal(
+    calls.some((c) =>
+      [
+        'create',
+        'import_register',
+        'test_connection',
+        'approve_trust',
+      ].includes(c.action),
+    ),
+    false,
+  );
   await act(async () => renderer.unmount());
 });

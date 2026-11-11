@@ -3,37 +3,19 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
-const worktree = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dist = (m) => pathToFileURL(join(worktree, 'dist', m + '.js')).href;
-let ts;
-for (const p of [
-  '/Users/majedsiefalnasr/Documents/Work/DeepSeek Harness/dsh-majed/.agents/worktrees/impl/146-skill-manager/node_modules/typescript/lib/typescript.js',
-  '/Users/majedsiefalnasr/Documents/Work/DeepSeek Harness/dsh-majed/node_modules/typescript/lib/typescript.js',
-]) { try { ts = (await import(pathToFileURL(p).href)).default; break; } catch {} }
-if (!ts) throw new Error('typescript not found for mcp-trash tests');
-
-async function buildModules() {
-  const { mkdirSync, readFileSync, writeFileSync } = await import('node:fs');
-  mkdirSync(join(worktree, 'dist'), { recursive: true });
-  for (const m of ['mcp-credentials','mcp-schema','mcp-trust','mcp-config-store','mcp-connection-test','mcp-tool-cache','mcp-import','mcp-discovery','mcp']) {
-    const src = readFileSync(join(worktree, 'src', m + '.ts'), 'utf8');
-    writeFileSync(join(worktree, 'dist', m + '.js'), ts.transpileModule(src, { compilerOptions: { module: 99, target: 99 }, fileName: m + '.ts' }).outputText);
-  }
-}
-
-await buildModules();
-const { McpCordisConfigStore } = await import(dist('mcp-config-store'));
-const { apply } = await import(dist('mcp'));
+import { McpCordisConfigStore } from '../dist/mcp-config-store.js';
+import { apply } from '../dist/mcp.js';
 
 function tempStore(initial = '[]\n') {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mcp-trash-'));
   const configPath = join(dir, 'cordis.patch.yml');
   writeFileSync(configPath, initial, 'utf8');
-  return { dir, configPath, store: new McpCordisConfigStore({ configPath }), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return {
+    dir,
+    configPath,
+    store: new McpCordisConfigStore({ configPath }),
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
 }
 
 const BASE = `
@@ -52,15 +34,34 @@ const BASE = `
 
 function makeCtx(configPath) {
   let registered;
-  const routes = { register(r) { registered = r; return () => {}; } };
-  apply({ inject: (deps, cb) => cb({ get: (k) => k === 'connection' ? { fetch: routes } : undefined }), on: () => {} }, { configPath });
+  const routes = {
+    register(r) {
+      registered = r;
+      return () => {};
+    },
+  };
+  apply(
+    {
+      inject: (deps, cb) =>
+        cb({
+          get: (k) => (k === 'connection' ? { fetch: routes } : undefined),
+        }),
+      on: () => {},
+    },
+    { configPath },
+  );
   return { route: registered };
 }
 
 async function call(route, body, headers = {}) {
   const req = new Request('http://127.0.0.1/api/waycraft-mcp.manage', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1', 'x-waycraft-mcp': '1', ...headers },
+    headers: {
+      'content-type': 'application/json',
+      origin: 'http://127.0.0.1',
+      'x-waycraft-mcp': '1',
+      ...headers,
+    },
     body: JSON.stringify(body),
   });
   const res = await route.fetch(req);
@@ -75,14 +76,23 @@ test('#173 trash is operational, not cosmetic: trashed entry removed from active
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.server.trash.trashed, true);
     assert.equal(r.server.trash.operationallyInactive, true);
-    assert.equal(r.server.disabled, true, 'trashed entry must be operationally inactive in persisted config');
-    assert.ok(!r.servers.some((s) => s.serverName === 'github'), 'trashed entry removed from active list');
+    assert.equal(
+      r.server.disabled,
+      true,
+      'trashed entry must be operationally inactive in persisted config',
+    );
+    assert.ok(
+      !r.servers.some((s) => s.serverName === 'github'),
+      'trashed entry removed from active list',
+    );
     assert.ok(r.trashedServers.some((s) => s.serverName === 'github'));
     const disk = readFileSync(t.configPath, 'utf8');
     assert.match(disk, /trash:/);
     assert.match(disk, /disabled: true/);
     assert.match(disk, /serverName: github/); // config preserved
-  } finally { t.cleanup(); }
+  } finally {
+    t.cleanup();
+  }
 });
 
 test('#173 no auto-reactivation while trashed: operational actions blocked and trashed name cannot be recreated silently', async () => {
@@ -91,15 +101,23 @@ test('#173 no auto-reactivation while trashed: operational actions blocked and t
     const fp = (await t.store.list()).fingerprint;
     await t.store.moveToTrash('github', fp);
     const { route } = makeCtx(t.configPath);
-    let r = await call(route, { action: 'test_connection', serverName: 'github' });
+    let r = await call(route, {
+      action: 'test_connection',
+      serverName: 'github',
+    });
     assert.equal(r.status, 409);
     assert.equal(r.json.code, 'trashed');
     r = await call(route, { action: 'refresh_tools', serverName: 'github' });
     assert.equal(r.status, 409);
-    r = await call(route, { action: 'create', config: { serverName: 'github', transport: 'stdio', command: 'echo' } });
+    r = await call(route, {
+      action: 'create',
+      config: { serverName: 'github', transport: 'stdio', command: 'echo' },
+    });
     assert.equal(r.status, 409);
     assert.match(String(r.json.error || r.json.message), /trash/i);
-  } finally { t.cleanup(); }
+  } finally {
+    t.cleanup();
+  }
 });
 
 test('#173 restore revalidates trust, preserves config/credential refs/provenance, defaults to non-running', async () => {
@@ -124,12 +142,25 @@ test('#173 restore revalidates trust, preserves config/credential refs/provenanc
     const r = await t.store.restore('gh', (await t.store.list()).fingerprint);
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.server.serverName, 'gh');
-    assert.equal(r.server.disabled, true, 'restore defaults to non-running/disabled');
-    assert.equal(r.server.trust.status !== 'trusted', true, 'trust must be revalidated after restore');
-    assert.equal(r.server.config.env.GITHUB_TOKEN, '${credential:github-token}');
+    assert.equal(
+      r.server.disabled,
+      true,
+      'restore defaults to non-running/disabled',
+    );
+    assert.equal(
+      r.server.trust.status !== 'trusted',
+      true,
+      'trust must be revalidated after restore',
+    );
+    assert.equal(
+      r.server.config.env.GITHUB_TOKEN,
+      '${credential:github-token}',
+    );
     assert.deepEqual(r.server.config.disabledTools, ['danger']);
     assert.ok(!r.trashedServers.some((s) => s.serverName === 'gh'));
-  } finally { t.cleanup(); }
+  } finally {
+    t.cleanup();
+  }
 });
 
 test('#173 restore blocks identity conflict and invalid config', async () => {
@@ -138,12 +169,20 @@ test('#173 restore blocks identity conflict and invalid config', async () => {
     await t.store.moveToTrash('github', (await t.store.list()).fingerprint);
     // Create different server, then manually corrupt trashed row name conflict is unlikely in single-row trash;
     // use invalid restore by corrupting config in place.
-    const disk = readFileSync(t.configPath, 'utf8').replace('transport: stdio', 'transport: nope');
+    const disk = readFileSync(t.configPath, 'utf8').replace(
+      'transport: stdio',
+      'transport: nope',
+    );
     writeFileSync(t.configPath, disk);
     const r = await t.store.restore('github');
     assert.equal(r.ok, false);
-    assert.ok(['validation','parse','conflict','blocked'].includes(r.code), JSON.stringify(r));
-  } finally { t.cleanup(); }
+    assert.ok(
+      ['validation', 'parse', 'conflict', 'blocked'].includes(r.code),
+      JSON.stringify(r),
+    );
+  } finally {
+    t.cleanup();
+  }
 });
 
 test('#173 permanent delete requires explicit confirmation and removes persistent config; shared credential refs not deleted', async () => {
@@ -162,12 +201,21 @@ test('#173 permanent delete requires explicit confirmation and removes persisten
     let r = await t.store.permanentDelete('gh', fp);
     assert.equal(r.ok, false);
     assert.equal(r.code, 'confirm_required');
-    r = await t.store.permanentDelete('gh', (await t.store.list()).fingerprint, { confirm: true });
+    r = await t.store.permanentDelete(
+      'gh',
+      (await t.store.list()).fingerprint,
+      { confirm: true },
+    );
     assert.equal(r.ok, true, JSON.stringify(r));
-    assert.match(String(r.limitation), /credential references are not deleted/i);
+    assert.match(
+      String(r.limitation),
+      /credential references are not deleted/i,
+    );
     const disk = readFileSync(t.configPath, 'utf8');
     assert.ok(!disk.includes('serverName: gh'));
-  } finally { t.cleanup(); }
+  } finally {
+    t.cleanup();
+  }
 });
 
 test('#173 externally owned entry: safe trash semantics documented and destructive mutation blocked', async () => {
@@ -182,13 +230,21 @@ test('#173 externally owned entry: safe trash semantics documented and destructi
     owner: some-other-plugin
 `);
   try {
-    const r = await t.store.moveToTrash('ext', (await t.store.list()).fingerprint);
+    const r = await t.store.moveToTrash(
+      'ext',
+      (await t.store.list()).fingerprint,
+    );
     assert.equal(r.ok, false);
     assert.equal(r.code, 'ownership');
     assert.match(String(r.limitation || r.message), /externally owned/i);
     const disk = readFileSync(t.configPath, 'utf8');
-    assert.ok(!disk.includes('\n  disabled: true'), 'must not destructively mutate externally owned entry');
-  } finally { t.cleanup(); }
+    assert.ok(
+      !disk.includes('\n  disabled: true'),
+      'must not destructively mutate externally owned entry',
+    );
+  } finally {
+    t.cleanup();
+  }
 });
 
 test('#173 RPC integration: trash/restore/permanent-delete cycle with Owner auth', async () => {
@@ -197,19 +253,38 @@ test('#173 RPC integration: trash/restore/permanent-delete cycle with Owner auth
     const { route } = makeCtx(t.configPath);
     let r = await call(route, { action: 'list' });
     const fp = r.json.fingerprint;
-    r = await call(route, { action: 'trash', serverName: 'github', expectedFingerprint: fp });
+    r = await call(route, {
+      action: 'trash',
+      serverName: 'github',
+      expectedFingerprint: fp,
+    });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.equal(r.json.server.trash.operationallyInactive, true);
     r = await call(route, { action: 'list_trash' });
     assert.ok(r.json.trashedServers.some((s) => s.serverName === 'github'));
-    r = await call(route, { action: 'restore', serverName: 'github', expectedFingerprint: r.json.fingerprint });
+    r = await call(route, {
+      action: 'restore',
+      serverName: 'github',
+      expectedFingerprint: r.json.fingerprint,
+    });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.equal(r.json.server.trust.status !== 'trusted', true);
-    r = await call(route, { action: 'permanent_delete', serverName: 'github', expectedFingerprint: r.json.fingerprint, confirm: true });
+    r = await call(route, {
+      action: 'permanent_delete',
+      serverName: 'github',
+      expectedFingerprint: r.json.fingerprint,
+      confirm: true,
+    });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     r = await call(route, { action: 'list' });
-    assert.ok(![...(r.json.servers||[]), ...(r.json.trashedServers||[])].some((s) => s.serverName === 'github'));
-  } finally { t.cleanup(); }
+    assert.ok(
+      ![...(r.json.servers || []), ...(r.json.trashedServers || [])].some(
+        (s) => s.serverName === 'github',
+      ),
+    );
+  } finally {
+    t.cleanup();
+  }
 });
 
 test('#173 operational-safety: test_connection cannot probe trashed entry (not merely hidden)', async () => {
@@ -233,11 +308,20 @@ test('#173 operational-safety: test_connection cannot probe trashed entry (not m
     await t2.store.approveTrust('github', fp).catch(() => {}); // may fail fingerprint binding in synthetic config; not required
     await t2.store.moveToTrash('github', (await t2.store.list()).fingerprint);
     const { route } = makeCtx(t2.configPath);
-    const r = await call(route, { action: 'test_connection', serverName: 'github' });
+    const r = await call(route, {
+      action: 'test_connection',
+      serverName: 'github',
+    });
     assert.equal(r.status, 409);
     assert.equal(r.json.code, 'trashed');
-    assert.match(String(r.json.error || r.json.message), /operationally inactive/i);
-  } finally { t.cleanup(); t2.cleanup(); }
+    assert.match(
+      String(r.json.error || r.json.message),
+      /operationally inactive/i,
+    );
+  } finally {
+    t.cleanup();
+    t2.cleanup();
+  }
 });
 
 test('#173/#176 legacy remove/delete alias requires explicit confirmation and deletes only when confirmed', async () => {
@@ -245,11 +329,22 @@ test('#173/#176 legacy remove/delete alias requires explicit confirmation and de
   try {
     const { route } = makeCtx(t.configPath);
     const fp = (await call(route, { action: 'list' })).json.fingerprint;
-    const noConfirm = await call(route, { action: 'delete', serverName: 'github', expectedFingerprint: fp });
+    const noConfirm = await call(route, {
+      action: 'delete',
+      serverName: 'github',
+      expectedFingerprint: fp,
+    });
     assert.equal(noConfirm.status, 409, JSON.stringify(noConfirm.json));
     assert.equal(noConfirm.json.code, 'confirm_required');
     const fp2 = (await call(route, { action: 'list' })).json.fingerprint;
-    const r = await call(route, { action: 'delete', serverName: 'github', expectedFingerprint: fp2, confirm: true });
+    const r = await call(route, {
+      action: 'delete',
+      serverName: 'github',
+      expectedFingerprint: fp2,
+      confirm: true,
+    });
     assert.equal(r.status, 200, JSON.stringify(r.json));
-  } finally { t.cleanup(); }
+  } finally {
+    t.cleanup();
+  }
 });

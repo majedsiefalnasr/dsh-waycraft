@@ -12,19 +12,37 @@ const external = [
   '@deepseek-ai/dsh-client-ui-attachment',
   '@deepseek-ai/dsh-client-schema-form',
 ];
-export default defineConfig({
-  entry: { subscriptions: 'src/browser.ts' },
-  outDir: 'dist',
-  format: 'cjs',
-  platform: 'browser',
-  dts: false,
-  clean: false,
-  external,
-  noExternal: (id) => (external.includes(id) ? undefined : true),
-  outputOptions: {
-    entryFileNames: 'subscriptions-client.js',
-    banner: 'const waycraftSubscriptionsFactory = (require) => {',
-    intro: 'var module = { exports: {} }; var exports = module.exports;',
-    footer: 'return module.exports; };',
+export default defineConfig([
+  {
+    entry: { subscriptions: 'src/browser.ts' },
+    outDir: 'dist',
+    format: 'cjs',
+    platform: 'browser',
+    dts: false,
+    clean: false,
+    external,
+    noExternal: (id) => (external.includes(id) ? undefined : true),
+    outputOptions: {
+      entryFileNames: 'subscriptions-client.js',
+      banner: 'const waycraftSubscriptionsFactory = (require) => {',
+      intro: 'var module = { exports: {} }; var exports = module.exports;',
+      footer: 'return module.exports; };',
+    },
   },
-});
+  {
+    entry: { mcp: 'src/mcp-browser.ts' },
+    outDir: 'dist',
+    format: 'cjs',
+    platform: 'browser',
+    dts: false,
+    clean: false,
+    external,
+    noExternal: (id) => (external.includes(id) ? undefined : true),
+    outputOptions: {
+      entryFileNames: 'mcp-client.js',
+      banner: 'const waycraftMcpFactory = (require) => {',
+      intro: 'var module = { exports: {} }; var exports = module.exports;',
+      footer: 'return module.exports; };',
+    },
+  },
+]);

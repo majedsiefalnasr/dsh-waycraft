@@ -30,7 +30,11 @@ export interface McpConnectionTestResult {
   stage?: McpProbeStage;
   message: string;
   durationMs: number;
-  capability: 'mcpManager.probe' | 'dsh-mcp-client.probeServer' | 'direct-mcp-sdk' | 'unavailable';
+  capability:
+    | 'mcpManager.probe'
+    | 'dsh-mcp-client.probeServer'
+    | 'direct-mcp-sdk'
+    | 'unavailable';
   capabilityVerified: boolean;
   serverInfo?: { name?: string; version?: string };
   toolNames?: string[];
@@ -52,25 +56,55 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_PAGES = 16;
 const MAX_TOOL_NAMES = 512;
 
-function now() { return Date.now(); }
+function now() {
+  return Date.now();
+}
 function asText(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
-  try { return JSON.stringify(err); } catch { return String(err); }
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
 }
-function safeText(v: unknown): string { return String(sanitizeMcpObservable(asText(v))); }
-
-function unavailable(message: string, stage: McpProbeStage = 'capability', started = now()): McpConnectionTestResult {
-  return { ok: false, stage, message: safeText(message), durationMs: now() - started, capability: 'unavailable', capabilityVerified: false };
+function safeText(v: unknown): string {
+  return String(sanitizeMcpObservable(asText(v)));
 }
 
-async function tryMcpManagerProbe(serverName: string, opts: McpConnectionTestOptions, started: number): Promise<McpConnectionTestResult | null> {
+function unavailable(
+  message: string,
+  stage: McpProbeStage = 'capability',
+  started = now(),
+): McpConnectionTestResult {
+  return {
+    ok: false,
+    stage,
+    message: safeText(message),
+    durationMs: now() - started,
+    capability: 'unavailable',
+    capabilityVerified: false,
+  };
+}
+
+async function tryMcpManagerProbe(
+  serverName: string,
+  opts: McpConnectionTestOptions,
+  started: number,
+): Promise<McpConnectionTestResult | null> {
   // The component does not inject mcpManager; reading an uninjected Cordis service throws, which is "not available" here.
   let mgr: any;
-  try { mgr = opts.ctx?.mcpManager ?? opts.ctx?.get?.('mcpManager'); } catch { mgr = undefined; }
+  try {
+    mgr = opts.ctx?.mcpManager ?? opts.ctx?.get?.('mcpManager');
+  } catch {
+    mgr = undefined;
+  }
   if (!mgr || typeof mgr.probe !== 'function') return null;
   try {
-    const raw = await mgr.probe(serverName, { signal: opts.signal, timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+    const raw = await mgr.probe(serverName, {
+      signal: opts.signal,
+      timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    });
     // Normalize a few common shapes without trusting private fields.
     const ok = !!(raw && typeof raw === 'object' && (raw as any).ok === true);
     if (ok) {
@@ -81,11 +115,23 @@ async function tryMcpManagerProbe(serverName: string, opts: McpConnectionTestOpt
         capability: 'mcpManager.probe',
         capabilityVerified: true,
         serverInfo: (raw as any).serverInfo,
-        toolNames: Array.isArray((raw as any).toolNames) ? (raw as any).toolNames.slice(0, MAX_TOOL_NAMES) : undefined,
-        tools: Array.isArray((raw as any).tools) ? sanitizeMcpObservable((raw as any).tools.slice(0, MAX_TOOL_NAMES)) as McpToolDescriptor[] : (Array.isArray((raw as any).toolNames) ? (raw as any).toolNames.slice(0, MAX_TOOL_NAMES).map((n: any) => ({ name: String(n) })) : undefined),
+        toolNames: Array.isArray((raw as any).toolNames)
+          ? (raw as any).toolNames.slice(0, MAX_TOOL_NAMES)
+          : undefined,
+        tools: Array.isArray((raw as any).tools)
+          ? (sanitizeMcpObservable(
+              (raw as any).tools.slice(0, MAX_TOOL_NAMES),
+            ) as McpToolDescriptor[])
+          : Array.isArray((raw as any).toolNames)
+            ? (raw as any).toolNames
+                .slice(0, MAX_TOOL_NAMES)
+                .map((n: any) => ({ name: String(n) }))
+            : undefined,
         truncated: !!(raw as any).truncated,
         closeConfirmed: (raw as any).closeConfirmed,
-        cleanupError: (raw as any).cleanupError ? safeText((raw as any).cleanupError) : undefined,
+        cleanupError: (raw as any).cleanupError
+          ? safeText((raw as any).cleanupError)
+          : undefined,
       };
     }
     return {
@@ -96,40 +142,79 @@ async function tryMcpManagerProbe(serverName: string, opts: McpConnectionTestOpt
       capability: 'mcpManager.probe',
       capabilityVerified: true,
       closeConfirmed: (raw as any)?.closeConfirmed,
-      cleanupError: (raw as any)?.cleanupError ? safeText((raw as any).cleanupError) : undefined,
+      cleanupError: (raw as any)?.cleanupError
+        ? safeText((raw as any).cleanupError)
+        : undefined,
     };
   } catch (err) {
-    return { ok: false, stage: 'connect', message: safeText(err), durationMs: now() - started, capability: 'mcpManager.probe', capabilityVerified: true };
+    return {
+      ok: false,
+      stage: 'connect',
+      message: safeText(err),
+      durationMs: now() - started,
+      capability: 'mcpManager.probe',
+      capabilityVerified: true,
+    };
   }
 }
 
-async function tryDshMcpClientProbe(config: McpServerConfig, opts: McpConnectionTestOptions, started: number): Promise<McpConnectionTestResult | null> {
+async function tryDshMcpClientProbe(
+  config: McpServerConfig,
+  opts: McpConnectionTestOptions,
+  started: number,
+): Promise<McpConnectionTestResult | null> {
   try {
     // Dynamic import: installed version may not export probeServer.
-    const mod: any = await import('@deepseek-ai/dsh-mcp-client').catch(() => null);
+    const optionalHostPackage = '@deepseek-ai/dsh-mcp-client';
+    const mod: any = await import(optionalHostPackage).catch(() => null);
     if (!mod || typeof mod.probeServer !== 'function') return null;
     // probeServer(ctx, config, options) in current source; may differ in installed builds.
     const probeConfig = mapToProbeConfig(config);
-    const raw = await mod.probeServer(opts.ctx ?? { logger: console }, probeConfig, {
-      timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      maxPages: opts.maxPages ?? MAX_PAGES,
-      maxToolNames: opts.maxToolNames ?? MAX_TOOL_NAMES,
-      signal: opts.signal,
-    });
+    const raw = await mod.probeServer(
+      opts.ctx ?? { logger: console },
+      probeConfig,
+      {
+        timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        maxPages: opts.maxPages ?? MAX_PAGES,
+        maxToolNames: opts.maxToolNames ?? MAX_TOOL_NAMES,
+        signal: opts.signal,
+      },
+    );
     const ok = !!(raw && raw.ok === true);
     if (ok) {
       return {
-        ok: true, message: 'Connected', durationMs: Number(raw.durationMs ?? now() - started),
-        capability: 'dsh-mcp-client.probeServer', capabilityVerified: true,
-        serverInfo: raw.serverInfo, toolNames: Array.isArray(raw.toolNames) ? raw.toolNames.slice(0, MAX_TOOL_NAMES) : undefined,
-        tools: Array.isArray(raw.tools) ? sanitizeMcpObservable(raw.tools.slice(0, MAX_TOOL_NAMES)) as McpToolDescriptor[] : (Array.isArray(raw.toolNames) ? raw.toolNames.slice(0, MAX_TOOL_NAMES).map((n: any) => ({ name: String(n) })) : undefined),
-        truncated: !!raw.truncated, closeConfirmed: raw.closeConfirmed, cleanupError: raw.cleanupError ? safeText(raw.cleanupError) : undefined,
+        ok: true,
+        message: 'Connected',
+        durationMs: Number(raw.durationMs ?? now() - started),
+        capability: 'dsh-mcp-client.probeServer',
+        capabilityVerified: true,
+        serverInfo: raw.serverInfo,
+        toolNames: Array.isArray(raw.toolNames)
+          ? raw.toolNames.slice(0, MAX_TOOL_NAMES)
+          : undefined,
+        tools: Array.isArray(raw.tools)
+          ? (sanitizeMcpObservable(
+              raw.tools.slice(0, MAX_TOOL_NAMES),
+            ) as McpToolDescriptor[])
+          : Array.isArray(raw.toolNames)
+            ? raw.toolNames
+                .slice(0, MAX_TOOL_NAMES)
+                .map((n: any) => ({ name: String(n) }))
+            : undefined,
+        truncated: !!raw.truncated,
+        closeConfirmed: raw.closeConfirmed,
+        cleanupError: raw.cleanupError ? safeText(raw.cleanupError) : undefined,
       };
     }
     return {
-      ok: false, stage: raw?.stage || 'connect', message: safeText(raw?.message || 'Connection test failed'),
-      durationMs: Number(raw?.durationMs ?? now() - started), capability: 'dsh-mcp-client.probeServer', capabilityVerified: true,
-      closeConfirmed: raw?.closeConfirmed, cleanupError: raw?.cleanupError ? safeText(raw.cleanupError) : undefined,
+      ok: false,
+      stage: raw?.stage || 'connect',
+      message: safeText(raw?.message || 'Connection test failed'),
+      durationMs: Number(raw?.durationMs ?? now() - started),
+      capability: 'dsh-mcp-client.probeServer',
+      capabilityVerified: true,
+      closeConfirmed: raw?.closeConfirmed,
+      cleanupError: raw?.cleanupError ? safeText(raw.cleanupError) : undefined,
     };
   } catch {
     return null; // not a verified usable capability in this runtime
@@ -148,15 +233,34 @@ function mapToProbeConfig(config: McpServerConfig): any {
     reconnect: config.reconnect,
   };
   if (config.transport === 'streamable-http') {
-    return { transport: 'streamable-http', ...common, url: config.url || '', headers: config.headers || {} };
+    return {
+      transport: 'streamable-http',
+      ...common,
+      url: config.url || '',
+      headers: config.headers || {},
+    };
   }
-  return { transport: 'stdio', ...common, command: config.command || '', args: config.args || [], env: config.env || {}, cwd: config.cwd || '' };
+  return {
+    transport: 'stdio',
+    ...common,
+    command: config.command || '',
+    args: config.args || [],
+    env: config.env || {},
+    cwd: config.cwd || '',
+  };
 }
 
-async function directSdkProbe(config: McpServerConfig, opts: McpConnectionTestOptions, started: number): Promise<McpConnectionTestResult> {
+async function directSdkProbe(
+  config: McpServerConfig,
+  opts: McpConnectionTestOptions,
+  started: number,
+): Promise<McpConnectionTestResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error('timeout')), Math.max(1, timeoutMs));
+  const timer = setTimeout(
+    () => controller.abort(new Error('timeout')),
+    Math.max(1, timeoutMs),
+  );
   const onAbort = () => controller.abort(opts.signal?.reason);
   if (opts.signal) {
     if (opts.signal.aborted) controller.abort(opts.signal.reason);
@@ -170,31 +274,91 @@ async function directSdkProbe(config: McpServerConfig, opts: McpConnectionTestOp
     const [{ Client }, stdioMod, httpMod] = await Promise.all([
       import('@modelcontextprotocol/sdk/client/index.js'),
       import('@modelcontextprotocol/sdk/client/stdio.js').catch(() => null),
-      import('@modelcontextprotocol/sdk/client/streamableHttp.js').catch(() => null),
+      import('@modelcontextprotocol/sdk/client/streamableHttp.js').catch(
+        () => null,
+      ),
     ] as any);
     if (config.transport === 'streamable-http') {
-      if (!httpMod?.StreamableHTTPClientTransport) return unavailable('Streamable HTTP client transport unavailable', 'capability', started);
-      if (!config.url) return { ok: false, stage: 'config', message: 'Missing URL', durationMs: now() - started, capability: 'direct-mcp-sdk', capabilityVerified: true };
-      transport = new httpMod.StreamableHTTPClientTransport(new URL(config.url), { requestInit: config.headers ? { headers: config.headers } : undefined });
+      if (!httpMod?.StreamableHTTPClientTransport)
+        return unavailable(
+          'Streamable HTTP client transport unavailable',
+          'capability',
+          started,
+        );
+      if (!config.url)
+        return {
+          ok: false,
+          stage: 'config',
+          message: 'Missing URL',
+          durationMs: now() - started,
+          capability: 'direct-mcp-sdk',
+          capabilityVerified: true,
+        };
+      transport = new httpMod.StreamableHTTPClientTransport(
+        new URL(config.url),
+        {
+          requestInit: config.headers ? { headers: config.headers } : undefined,
+        },
+      );
     } else {
-      if (!stdioMod?.StdioClientTransport) return unavailable('Stdio client transport unavailable', 'capability', started);
-      if (!config.command) return { ok: false, stage: 'config', message: 'Missing command', durationMs: now() - started, capability: 'direct-mcp-sdk', capabilityVerified: true };
-      transport = new stdioMod.StdioClientTransport({ command: config.command, args: config.args || [], env: config.env, cwd: config.cwd || undefined, stderr: 'ignore' });
+      if (!stdioMod?.StdioClientTransport)
+        return unavailable(
+          'Stdio client transport unavailable',
+          'capability',
+          started,
+        );
+      if (!config.command)
+        return {
+          ok: false,
+          stage: 'config',
+          message: 'Missing command',
+          durationMs: now() - started,
+          capability: 'direct-mcp-sdk',
+          capabilityVerified: true,
+        };
+      transport = new stdioMod.StdioClientTransport({
+        command: config.command,
+        args: config.args || [],
+        env: config.env,
+        cwd: config.cwd || undefined,
+        stderr: 'ignore',
+      });
     }
-    client = new Client({ name: 'waycraft-mcp-probe', version: '1.0.0' }, { capabilities: {} });
+    client = new Client(
+      { name: 'waycraft-mcp-probe', version: '1.0.0' },
+      { capabilities: {} },
+    );
     await client.connect(transport, { signal: controller.signal });
     stage = 'list';
-    const serverInfo = typeof client.getServerVersion === 'function' ? client.getServerVersion() : undefined;
+    const serverInfo =
+      typeof client.getServerVersion === 'function'
+        ? client.getServerVersion()
+        : undefined;
     const tools: McpToolDescriptor[] = [];
     let truncated = false;
     let cursor: string | undefined;
-    const caps = typeof client.getServerCapabilities === 'function' ? client.getServerCapabilities() : undefined;
+    const caps =
+      typeof client.getServerCapabilities === 'function'
+        ? client.getServerCapabilities()
+        : undefined;
     if (caps?.tools !== undefined) {
       for (let page = 0; page < (opts.maxPages ?? MAX_PAGES); page++) {
-        const res = await client.listTools(cursor ? { cursor } : undefined, { signal: controller.signal });
+        const res = await client.listTools(cursor ? { cursor } : undefined, {
+          signal: controller.signal,
+        });
         for (const t of res?.tools || []) {
-          if (tools.length >= (opts.maxToolNames ?? MAX_TOOL_NAMES)) { truncated = true; break; }
-          tools.push(sanitizeMcpObservable({ name: String(t.name), description: t.description ? String(t.description) : undefined, inputSchema: t.inputSchema, title: (t as any).title ? String((t as any).title) : undefined }) as McpToolDescriptor);
+          if (tools.length >= (opts.maxToolNames ?? MAX_TOOL_NAMES)) {
+            truncated = true;
+            break;
+          }
+          tools.push(
+            sanitizeMcpObservable({
+              name: String(t.name),
+              description: t.description ? String(t.description) : undefined,
+              inputSchema: t.inputSchema,
+              title: (t as any).title ? String((t as any).title) : undefined,
+            }) as McpToolDescriptor,
+          );
         }
         cursor = res?.nextCursor;
         if (!cursor || truncated) break;
@@ -202,24 +366,65 @@ async function directSdkProbe(config: McpServerConfig, opts: McpConnectionTestOp
     }
     let closeConfirmed = true;
     let cleanupError: string | undefined;
-    try { await client.close(); } catch (e) { closeConfirmed = false; cleanupError = safeText(e); }
-    return { ok: true, message: 'Connected', durationMs: now() - started, capability: 'direct-mcp-sdk', capabilityVerified: true, serverInfo, toolNames: tools.map(t => t.name), tools, truncated, closeConfirmed, cleanupError };
+    try {
+      await client.close();
+    } catch (e) {
+      closeConfirmed = false;
+      cleanupError = safeText(e);
+    }
+    return {
+      ok: true,
+      message: 'Connected',
+      durationMs: now() - started,
+      capability: 'direct-mcp-sdk',
+      capabilityVerified: true,
+      serverInfo,
+      toolNames: tools.map((t) => t.name),
+      tools,
+      truncated,
+      closeConfirmed,
+      cleanupError,
+    };
   } catch (err) {
-    const msg = controller.signal.aborted && !(opts.signal?.aborted) ? `Connection test timed out after ${timeoutMs}ms` : safeText(err);
+    const msg =
+      controller.signal.aborted && !opts.signal?.aborted
+        ? `Connection test timed out after ${timeoutMs}ms`
+        : safeText(err);
     let closeConfirmed = false;
     let cleanupError: string | undefined;
-    try { await client?.close?.(); closeConfirmed = true; } catch (e) { cleanupError = safeText(e); }
-    try { await transport?.close?.(); } catch {}
-    return { ok: false, stage, message: msg, durationMs: now() - started, capability: 'direct-mcp-sdk', capabilityVerified: true, closeConfirmed, cleanupError };
+    try {
+      await client?.close?.();
+      closeConfirmed = true;
+    } catch (e) {
+      cleanupError = safeText(e);
+    }
+    try {
+      await transport?.close?.();
+    } catch {}
+    return {
+      ok: false,
+      stage,
+      message: msg,
+      durationMs: now() - started,
+      capability: 'direct-mcp-sdk',
+      capabilityVerified: true,
+      closeConfirmed,
+      cleanupError,
+    };
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener('abort', onAbort);
   }
 }
 
-export async function testMcpConnection(serverName: string, config: McpServerConfig, opts: McpConnectionTestOptions = {}): Promise<McpConnectionTestResult> {
+export async function testMcpConnection(
+  serverName: string,
+  config: McpServerConfig,
+  opts: McpConnectionTestOptions = {},
+): Promise<McpConnectionTestResult> {
   const started = now();
-  if (!config || typeof config !== 'object') return unavailable('Missing server config', 'config', started);
+  if (!config || typeof config !== 'object')
+    return unavailable('Missing server config', 'config', started);
   // 1) Verified host capability if present.
   const mgr = await tryMcpManagerProbe(serverName, opts, started);
   if (mgr) return mgr;

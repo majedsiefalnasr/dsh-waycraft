@@ -1,47 +1,46 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const distDir = join(here, '../dist');
-async function ensureBuild(name) {
-  const distPath = join(distDir, `${name}.js`);
-  const srcPath = join(here, `../src/${name}.ts`);
-  const src = readFileSync(srcPath, 'utf8');
-  const tsPaths = [
-    '/Users/majedsiefalnasr/Documents/Work/DeepSeek Harness/dsh-majed/.agents/worktrees/impl/146-skill-manager/node_modules/typescript/lib/typescript.js',
-    '/Users/majedsiefalnasr/Documents/Work/DeepSeek Harness/dsh-majed/.agents/worktrees/impl/150-import-uploads/node_modules/typescript/lib/typescript.js',
-  ];
-  let ts;
-  for (const p of tsPaths) { try { ts = (await import(pathToFileURL(p).href)).default; break; } catch {} }
-  if (!ts) throw new Error('typescript compiler not found');
-  const out = ts.transpileModule(src, { compilerOptions: { module: 99, target: 99 }, fileName: `${name}.ts` }).outputText;
-  mkdirSync(distDir, { recursive: true });
-  writeFileSync(distPath, out);
-}
-for (const m of ['mcp-credentials', 'mcp-schema', 'mcp-trust', 'mcp-config-store', 'mcp']) await ensureBuild(m);
-
-const trust = await import(pathToFileURL(join(distDir, 'mcp-trust.js')).href);
-const { McpCordisConfigStore } = await import(pathToFileURL(join(distDir, 'mcp-config-store.js')).href);
-const { apply } = await import(pathToFileURL(join(distDir, 'mcp.js')).href);
+import * as trust from '../dist/mcp-trust.js';
+import { McpCordisConfigStore } from '../dist/mcp-config-store.js';
+import { apply } from '../dist/mcp.js';
 
 function tempStore(initial = '[]\n') {
   const dir = mkdtempSync(join(tmpdir(), 'mcp-trust-'));
   const configPath = join(dir, 'cordis.patch.yml');
   writeFileSync(configPath, initial);
   const store = new McpCordisConfigStore({ configPath });
-  return { dir, configPath, store, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return {
+    dir,
+    configPath,
+    store,
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
 }
 
-const stdio = (name, extra = {}) => ({ serverName: name, transport: 'stdio', command: 'npx', args: ['-y', 'pkg'], ...extra });
-const http = (name, extra = {}) => ({ serverName: name, transport: 'streamable-http', url: 'https://example.test/mcp', ...extra });
+const stdio = (name, extra = {}) => ({
+  serverName: name,
+  transport: 'stdio',
+  command: 'npx',
+  args: ['-y', 'pkg'],
+  ...extra,
+});
+const http = (name, extra = {}) => ({
+  serverName: name,
+  transport: 'streamable-http',
+  url: 'https://example.test/mcp',
+  ...extra,
+});
 
 test('#167 fingerprint: same material config => same fingerprint', () => {
   const a = trust.reviewedConfigFingerprint(stdio('a'));
-  const b = trust.reviewedConfigFingerprint({ ...stdio('a'), ignoredNote: 'x' }); // non-material extra ignored by payload? serverName included; ignoredNote not in payload
+  const b = trust.reviewedConfigFingerprint({
+    ...stdio('a'),
+    ignoredNote: 'x',
+  }); // non-material extra ignored by payload? serverName included; ignoredNote not in payload
   assert.equal(a, b);
 });
 
@@ -50,11 +49,14 @@ test('#167 material changes invalidate trust (command/args/endpoint/auth/privile
   for (const [label, after] of [
     ['command', { ...base, command: 'node' }],
     ['args', { ...base, args: ['other'] }],
-    ['endpoint', http('srv') ],
-    ['auth/header', http('srv', { headers: { Authorization: '${credential:REF}' } }) ],
+    ['endpoint', http('srv')],
+    [
+      'auth/header',
+      http('srv', { headers: { Authorization: '${credential:REF}' } }),
+    ],
     ['env/auth config', { ...base, env: { TOKEN: '${credential:REF}' } }],
     ['cwd', { ...base, cwd: '/tmp' }],
-    ['url', http('srv', { url: 'https://other.test/mcp' }) ],
+    ['url', http('srv', { url: 'https://other.test/mcp' })],
   ]) {
     const d = trust.detectMaterialChange(base, after);
     assert.equal(d.changed, true, label);
@@ -66,31 +68,44 @@ test('#167 material changes invalidate trust (command/args/endpoint/auth/privile
 test('#167 approval authorizes reviewed configuration fingerprint only', async () => {
   const t = tempStore();
   try {
-    let r = await t.store.create(stdio('srv'), (await t.store.list()).fingerprint);
+    let r = await t.store.create(
+      stdio('srv'),
+      (await t.store.list()).fingerprint,
+    );
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.server.trust.state, 'untrusted'); // saving does not imply trust
     r = await t.store.approveTrust('srv', r.fingerprint);
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.server.trust.state, 'trusted');
-    assert.equal(r.server.trust.fingerprint, r.server.reviewedConfigFingerprint);
+    assert.equal(
+      r.server.trust.fingerprint,
+      r.server.reviewedConfigFingerprint,
+    );
     r = await t.store.update('srv', { args: ['-y', 'other'] }, r.fingerprint); // material change
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.server.trust.state, 'invalidated');
     assert.equal(r.server.trust.reason, 'material_change');
-  } finally { t.cleanup(); }
+  } finally {
+    t.cleanup();
+  }
 });
 
 test('#167 saving does not imply trust; import/discovery never execute (no execute path exposed)', async () => {
   const t = tempStore();
   try {
-    const created = await t.store.create(stdio('saved'), (await t.store.list()).fingerprint);
+    const created = await t.store.create(
+      stdio('saved'),
+      (await t.store.list()).fingerprint,
+    );
     assert.equal(created.server.trust.state, 'untrusted');
     assert.equal(created.server.trust.reason, 'save_does_not_imply_trust');
     // No import/discovery execute methods exist on store; only CRUD/trust/status.
     assert.equal(typeof t.store.create, 'function');
-    assert.equal(typeof (t.store).importServers, 'undefined');
-    assert.equal(typeof (t.store).discoverAndRun, 'undefined');
-  } finally { t.cleanup(); }
+    assert.equal(typeof t.store.importServers, 'undefined');
+    assert.equal(typeof t.store.discoverAndRun, 'undefined');
+  } finally {
+    t.cleanup();
+  }
 });
 
 test('#167 integration: explicit connection testing cannot bypass trust approval', async () => {
@@ -98,12 +113,38 @@ test('#167 integration: explicit connection testing cannot bypass trust approval
   try {
     process.env.DSH_CORDIS_PATCH_PATH = t.configPath;
     const routes = new Map();
-    const services = { connection: { fetch: { register(route) { routes.set(route.path, route); return () => routes.delete(route.path); } } } };
-    const ctx = { logger: { warn() {}, info() {}, error() {} }, get: (n) => services[n], inject: (names, fn) => { if ([].concat(names).every((n) => services[n])) fn(ctx); }, effect: (fn) => fn(), on() {} };
+    const services = {
+      connection: {
+        fetch: {
+          register(route) {
+            routes.set(route.path, route);
+            return () => routes.delete(route.path);
+          },
+        },
+      },
+    };
+    const ctx = {
+      logger: { warn() {}, info() {}, error() {} },
+      get: (n) => services[n],
+      inject: (names, fn) => {
+        if ([].concat(names).every((n) => services[n])) fn(ctx);
+      },
+      effect: (fn) => fn(),
+      on() {},
+    };
     apply(ctx);
     const route = routes.get('/api/waycraft-mcp.manage');
     const call = async (body) => {
-      const res = await route.fetch(new Request('http://localhost/api/waycraft-mcp.manage', { method: 'POST', headers: { 'content-type': 'application/json', 'x-waycraft-mcp': '1' }, body: JSON.stringify(body) }));
+      const res = await route.fetch(
+        new Request('http://localhost/api/waycraft-mcp.manage', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-waycraft-mcp': '1',
+          },
+          body: JSON.stringify(body),
+        }),
+      );
       return { status: res.status, data: await res.json() };
     };
     let r = await call({ action: 'create', config: stdio('srv') });
@@ -111,7 +152,11 @@ test('#167 integration: explicit connection testing cannot bypass trust approval
     r = await call({ action: 'test_connection', serverName: 'srv' });
     assert.equal(r.status, 403);
     assert.equal(r.data.code, 'trust_required');
-    r = await call({ action: 'approve_trust', serverName: 'srv', expectedFingerprint: r.data.fingerprint });
+    r = await call({
+      action: 'approve_trust',
+      serverName: 'srv',
+      expectedFingerprint: r.data.fingerprint,
+    });
     assert.equal(r.status, 200, JSON.stringify(r.data));
     r = await call({ action: 'test_connection', serverName: 'srv' });
     // #167 gate passed; #168 performs real explicit test (may fail for fake command, but must not be trust-blocked).
@@ -119,7 +164,10 @@ test('#167 integration: explicit connection testing cannot bypass trust approval
     assert.notEqual(r.data?.code, 'trust_required');
     assert.ok(r.data?.test && typeof r.data.test === 'object');
     assert.equal(r.data.test.capabilityVerified, true);
-  } finally { delete process.env.DSH_CORDIS_PATCH_PATH; t.cleanup(); }
+  } finally {
+    delete process.env.DSH_CORDIS_PATCH_PATH;
+    t.cleanup();
+  }
 });
 
 test('#167 no new sandbox platform / project scope not misrepresented', () => {

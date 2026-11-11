@@ -17,7 +17,12 @@ export interface McpToolDescriptor {
   title?: string;
 }
 
-export type McpToolCacheFreshness = 'fresh' | 'stale' | 'never' | 'invalidated' | 'error';
+export type McpToolCacheFreshness =
+  | 'fresh'
+  | 'stale'
+  | 'never'
+  | 'invalidated'
+  | 'error';
 
 export interface McpToolCacheEntry {
   serverName: string;
@@ -34,18 +39,43 @@ export interface McpToolCacheEntry {
   capability?: string;
 }
 
-interface CacheFile { version: 1; servers: Record<string, McpToolCacheEntry>; }
+interface CacheFile {
+  version: 1;
+  servers: Record<string, McpToolCacheEntry>;
+}
 
-function nowIso() { return new Date().toISOString(); }
-function emptyEntry(serverName: string, freshness: McpToolCacheFreshness = 'never', reason?: string): McpToolCacheEntry {
-  return { serverName, configFingerprint: '', freshness, status: freshness === 'error' ? 'error' : 'never', message: reason, tools: [], toolCount: 0, invalidatedAt: reason ? nowIso() : undefined, invalidationReason: reason };
+function nowIso() {
+  return new Date().toISOString();
+}
+function emptyEntry(
+  serverName: string,
+  freshness: McpToolCacheFreshness = 'never',
+  reason?: string,
+): McpToolCacheEntry {
+  return {
+    serverName,
+    configFingerprint: '',
+    freshness,
+    status: freshness === 'error' ? 'error' : 'never',
+    message: reason,
+    tools: [],
+    toolCount: 0,
+    invalidatedAt: reason ? nowIso() : undefined,
+    invalidationReason: reason,
+  };
 }
 
 async function readCache(path: string): Promise<CacheFile> {
   try {
     const text = await readFile(path, 'utf8');
     const parsed = JSON.parse(text);
-    if (parsed && parsed.version === 1 && parsed.servers && typeof parsed.servers === 'object') return parsed as CacheFile;
+    if (
+      parsed &&
+      parsed.version === 1 &&
+      parsed.servers &&
+      typeof parsed.servers === 'object'
+    )
+      return parsed as CacheFile;
   } catch {}
   return { version: 1, servers: {} };
 }
@@ -56,13 +86,18 @@ async function writeAtomic(path: string, text: string): Promise<void> {
   try {
     await writeFile(tmp, text, 'utf8');
     await rename(tmp, path);
-  } catch (e) { await rm(tmp, { force: true }).catch(() => {}); throw e; }
+  } catch (e) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw e;
+  }
 }
 
 export class McpToolCacheStore {
   private writeChain: Promise<unknown> = Promise.resolve();
   constructor(private readonly cachePath: string) {}
-  get path() { return this.cachePath; }
+  get path() {
+    return this.cachePath;
+  }
 
   private serialize<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.writeChain.then(fn, fn);
@@ -70,37 +105,83 @@ export class McpToolCacheStore {
     return run;
   }
 
-  private freshnessOf(entry: McpToolCacheEntry | undefined, config: McpServerConfig): McpToolCacheEntry {
+  private freshnessOf(
+    entry: McpToolCacheEntry | undefined,
+    config: McpServerConfig,
+  ): McpToolCacheEntry {
     if (!entry) return emptyEntry(config.serverName, 'never');
     const fp = reviewedConfigFingerprint(config);
-    if (!entry.enumeratedAt && entry.status !== 'error') return { ...entry, serverName: config.serverName, configFingerprint: entry.configFingerprint || '', freshness: 'never', toolCount: entry.toolCount || 0, tools: entry.tools || [] };
+    if (!entry.enumeratedAt && entry.status !== 'error')
+      return {
+        ...entry,
+        serverName: config.serverName,
+        configFingerprint: entry.configFingerprint || '',
+        freshness: 'never',
+        toolCount: entry.toolCount || 0,
+        tools: entry.tools || [],
+      };
     if (!entry.configFingerprint || entry.configFingerprint !== fp) {
-      return { ...entry, freshness: 'stale', invalidationReason: entry.invalidationReason || 'config_scope_or_policy_changed' };
+      return {
+        ...entry,
+        freshness: 'stale',
+        invalidationReason:
+          entry.invalidationReason || 'config_scope_or_policy_changed',
+      };
     }
     if (entry.freshness === 'invalidated') return entry;
     if (entry.status === 'error') return { ...entry, freshness: 'error' };
     return { ...entry, freshness: 'fresh' };
   }
 
-  async get(serverName: string, config: McpServerConfig): Promise<McpToolCacheEntry> {
+  async get(
+    serverName: string,
+    config: McpServerConfig,
+  ): Promise<McpToolCacheEntry> {
     const file = await readCache(this.cachePath);
-    return sanitizeMcpObservable(this.freshnessOf(file.servers[serverName], config)) as McpToolCacheEntry;
+    return sanitizeMcpObservable(
+      this.freshnessOf(file.servers[serverName], config),
+    ) as McpToolCacheEntry;
   }
 
-  async list(configsByName: Record<string, McpServerConfig>): Promise<Record<string, McpToolCacheEntry>> {
+  async list(
+    configsByName: Record<string, McpServerConfig>,
+  ): Promise<Record<string, McpToolCacheEntry>> {
     const file = await readCache(this.cachePath);
     const out: Record<string, McpToolCacheEntry> = {};
-    for (const [name, config] of Object.entries(configsByName)) out[name] = sanitizeMcpObservable(this.freshnessOf(file.servers[name], config)) as McpToolCacheEntry;
+    for (const [name, config] of Object.entries(configsByName))
+      out[name] = sanitizeMcpObservable(
+        this.freshnessOf(file.servers[name], config),
+      ) as McpToolCacheEntry;
     return out;
   }
 
-  async updateFromProbe(serverName: string, config: McpServerConfig, probe: {
-    ok: boolean; message: string; tools?: McpToolDescriptor[]; toolNames?: string[]; truncated?: boolean; capability?: string;
-  }): Promise<McpToolCacheEntry> {
+  async updateFromProbe(
+    serverName: string,
+    config: McpServerConfig,
+    probe: {
+      ok: boolean;
+      message: string;
+      tools?: McpToolDescriptor[];
+      toolNames?: string[];
+      truncated?: boolean;
+      capability?: string;
+    },
+  ): Promise<McpToolCacheEntry> {
     return this.serialize(async () => {
       const file = await readCache(this.cachePath);
-      const tools = (probe.tools?.length ? probe.tools : (probe.toolNames || []).map(name => ({ name })))
-        .map(t => sanitizeMcpObservable({ name: String(t.name || ''), description: t.description ? String(t.description) : undefined, inputSchema: t.inputSchema, title: t.title ? String(t.title) : undefined }))
+      const tools = (
+        probe.tools?.length
+          ? probe.tools
+          : (probe.toolNames || []).map((name): McpToolDescriptor => ({ name }))
+      )
+        .map((t) =>
+          sanitizeMcpObservable({
+            name: String(t.name || ''),
+            description: t.description ? String(t.description) : undefined,
+            inputSchema: t.inputSchema,
+            title: t.title ? String(t.title) : undefined,
+          }),
+        )
         .filter((t: any) => t.name) as McpToolDescriptor[];
       const entry: McpToolCacheEntry = {
         serverName,
@@ -150,18 +231,35 @@ export class McpToolCacheStore {
   }
 }
 
-export function searchMcpTools(tools: McpToolDescriptor[], query?: string): McpToolDescriptor[] {
-  const q = String(query || '').trim().toLowerCase();
+export function searchMcpTools(
+  tools: McpToolDescriptor[],
+  query?: string,
+): McpToolDescriptor[] {
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
   if (!q) return tools;
-  return tools.filter(t => [t.name, t.title, t.description].filter(Boolean).some(v => String(v).toLowerCase().includes(q)));
+  return tools.filter((t) =>
+    [t.name, t.title, t.description]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(q)),
+  );
 }
 
-export function resolveMcpToolCachePath(opts?: { home?: string; profile?: string; configPath?: string }): string {
+export function resolveMcpToolCachePath(opts?: {
+  home?: string;
+  profile?: string;
+  configPath?: string;
+}): string {
   // If config path is provided (e.g. tests use DSH_CORDIS_PATCH_PATH temp dirs),
   // keep cache beside that profile's cordis config to avoid polluting real state.
   const configPath = opts?.configPath || process.env.DSH_CORDIS_PATCH_PATH;
-  if (configPath) return join(dirname(configPath), 'waycraft-mcp', 'tool-cache.json');
-  const home = opts?.home || process.env.DSH_HOME || join(process.env.HOME || '/tmp', '.dsh');
+  if (configPath)
+    return join(dirname(configPath), 'waycraft-mcp', 'tool-cache.json');
+  const home =
+    opts?.home ||
+    process.env.DSH_HOME ||
+    join(process.env.HOME || '/tmp', '.dsh');
   const profile = opts?.profile || process.env.DSH_PROFILE || 'desktop';
   // Waycraft-owned metadata cache (separate from DSH config). No secrets.
   return join(home, 'profiles', profile, 'waycraft-mcp', 'tool-cache.json');

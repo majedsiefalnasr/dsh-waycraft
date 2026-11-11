@@ -8,15 +8,30 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { sanitizeMcpObservable } from './mcp-credentials.js';
 import { reviewedConfigFingerprint } from './mcp-trust.js';
-function nowIso() { return new Date().toISOString(); }
+function nowIso() {
+    return new Date().toISOString();
+}
 function emptyEntry(serverName, freshness = 'never', reason) {
-    return { serverName, configFingerprint: '', freshness, status: freshness === 'error' ? 'error' : 'never', message: reason, tools: [], toolCount: 0, invalidatedAt: reason ? nowIso() : undefined, invalidationReason: reason };
+    return {
+        serverName,
+        configFingerprint: '',
+        freshness,
+        status: freshness === 'error' ? 'error' : 'never',
+        message: reason,
+        tools: [],
+        toolCount: 0,
+        invalidatedAt: reason ? nowIso() : undefined,
+        invalidationReason: reason,
+    };
 }
 async function readCache(path) {
     try {
         const text = await readFile(path, 'utf8');
         const parsed = JSON.parse(text);
-        if (parsed && parsed.version === 1 && parsed.servers && typeof parsed.servers === 'object')
+        if (parsed &&
+            parsed.version === 1 &&
+            parsed.servers &&
+            typeof parsed.servers === 'object')
             return parsed;
     }
     catch { }
@@ -40,7 +55,9 @@ export class McpToolCacheStore {
     constructor(cachePath) {
         this.cachePath = cachePath;
     }
-    get path() { return this.cachePath; }
+    get path() {
+        return this.cachePath;
+    }
     serialize(fn) {
         const run = this.writeChain.then(fn, fn);
         this.writeChain = run.catch(() => { });
@@ -51,9 +68,20 @@ export class McpToolCacheStore {
             return emptyEntry(config.serverName, 'never');
         const fp = reviewedConfigFingerprint(config);
         if (!entry.enumeratedAt && entry.status !== 'error')
-            return { ...entry, serverName: config.serverName, configFingerprint: entry.configFingerprint || '', freshness: 'never', toolCount: entry.toolCount || 0, tools: entry.tools || [] };
+            return {
+                ...entry,
+                serverName: config.serverName,
+                configFingerprint: entry.configFingerprint || '',
+                freshness: 'never',
+                toolCount: entry.toolCount || 0,
+                tools: entry.tools || [],
+            };
         if (!entry.configFingerprint || entry.configFingerprint !== fp) {
-            return { ...entry, freshness: 'stale', invalidationReason: entry.invalidationReason || 'config_scope_or_policy_changed' };
+            return {
+                ...entry,
+                freshness: 'stale',
+                invalidationReason: entry.invalidationReason || 'config_scope_or_policy_changed',
+            };
         }
         if (entry.freshness === 'invalidated')
             return entry;
@@ -75,8 +103,15 @@ export class McpToolCacheStore {
     async updateFromProbe(serverName, config, probe) {
         return this.serialize(async () => {
             const file = await readCache(this.cachePath);
-            const tools = (probe.tools?.length ? probe.tools : (probe.toolNames || []).map(name => ({ name })))
-                .map(t => sanitizeMcpObservable({ name: String(t.name || ''), description: t.description ? String(t.description) : undefined, inputSchema: t.inputSchema, title: t.title ? String(t.title) : undefined }))
+            const tools = (probe.tools?.length
+                ? probe.tools
+                : (probe.toolNames || []).map((name) => ({ name })))
+                .map((t) => sanitizeMcpObservable({
+                name: String(t.name || ''),
+                description: t.description ? String(t.description) : undefined,
+                inputSchema: t.inputSchema,
+                title: t.title ? String(t.title) : undefined,
+            }))
                 .filter((t) => t.name);
             const entry = {
                 serverName,
@@ -125,10 +160,14 @@ export class McpToolCacheStore {
     }
 }
 export function searchMcpTools(tools, query) {
-    const q = String(query || '').trim().toLowerCase();
+    const q = String(query || '')
+        .trim()
+        .toLowerCase();
     if (!q)
         return tools;
-    return tools.filter(t => [t.name, t.title, t.description].filter(Boolean).some(v => String(v).toLowerCase().includes(q)));
+    return tools.filter((t) => [t.name, t.title, t.description]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q)));
 }
 export function resolveMcpToolCachePath(opts) {
     // If config path is provided (e.g. tests use DSH_CORDIS_PATCH_PATH temp dirs),
@@ -136,7 +175,9 @@ export function resolveMcpToolCachePath(opts) {
     const configPath = opts?.configPath || process.env.DSH_CORDIS_PATCH_PATH;
     if (configPath)
         return join(dirname(configPath), 'waycraft-mcp', 'tool-cache.json');
-    const home = opts?.home || process.env.DSH_HOME || join(process.env.HOME || '/tmp', '.dsh');
+    const home = opts?.home ||
+        process.env.DSH_HOME ||
+        join(process.env.HOME || '/tmp', '.dsh');
     const profile = opts?.profile || process.env.DSH_PROFILE || 'desktop';
     // Waycraft-owned metadata cache (separate from DSH config). No secrets.
     return join(home, 'profiles', profile, 'waycraft-mcp', 'tool-cache.json');

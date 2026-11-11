@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 test('waycraft-mcp component is registered as default-off in cordis.patch.yml', async () => {
-  const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8');
+  const patch = await readFile(
+    new URL('../cordis.patch.yml', import.meta.url),
+    'utf8',
+  );
   assert.match(patch, /id:\s*waycraft-mcp/);
   assert.match(patch, /name:\s*'dsh-waycraft\/mcp'/);
   // default-off
@@ -14,6 +17,8 @@ test('waycraft-mcp component is registered as default-off in cordis.patch.yml', 
 });
 
 test('mcp component exports are declared in package.json', async () => {
-  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const pkg = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  );
   assert.equal(pkg.exports['./mcp'], './dist/mcp.js');
 });
