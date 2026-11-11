@@ -1,6 +1,6 @@
 {
   "name": "dsh-waycraft",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Waycraft for DSH: interface and workflow enhancements, bidirectional text, subscription providers and account usage controls for DeepSeek Harness.",
   "keywords": [
     "deepseek-harness",
