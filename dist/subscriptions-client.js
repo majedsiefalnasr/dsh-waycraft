@@ -5640,6 +5640,15 @@ function setupMcp(ctx, fail) {
 			registryGeneration.current++;
 			registryAbort.current?.abort();
 		}, []);
+		const registryResults = React.useRef(null);
+		const registryWasBusy = React.useRef(false);
+		React.useEffect(() => {
+			const finished = registryWasBusy.current && !registryBusy;
+			registryWasBusy.current = registryBusy;
+			if (!finished || typeof document === "undefined") return;
+			const active = document.activeElement;
+			if (!active || active === document.body) registryResults.current?.focus?.();
+		}, [registryBusy]);
 		const searchRegistry = async (cursor) => {
 			registryAbort.current?.abort();
 			const controller = new AbortController();
@@ -5971,7 +5980,10 @@ function setupMcp(ctx, fail) {
 				event.preventDefault();
 				searchRegistry();
 			}
-		}, t("registrySearch"))), registryBusy ? h("p", { role: "status" }, t("loading")) : null, registryError ? h("div", { role: "alert" }, registryError, h("button", {
+		}, t("registrySearch"))), registryBusy ? h("p", { role: "status" }, t("loading")) : null, h("div", {
+			ref: registryResults,
+			tabIndex: -1
+		}, registryError ? h("div", { role: "alert" }, registryError, h("button", {
 			type: "button",
 			onClick: () => void searchRegistry()
 		}, t("retry"))) : null, registry && !registryBusy ? h("div", null, !registry.servers?.length ? h("p", { role: "status" }, t("registryEmpty")) : null, ...(registry.servers || []).map((server) => {
@@ -6013,7 +6025,7 @@ function setupMcp(ctx, fail) {
 			type: "button",
 			disabled: registryBusy,
 			onClick: () => void searchRegistry(registry.nextCursor)
-		}, t("registryNext")) : null) : null);
+		}, t("registryNext")) : null) : null));
 		const discoveryArea = h("section", {
 			"aria-label": t("discoverTitle"),
 			className: "waycraft-mcp-card"

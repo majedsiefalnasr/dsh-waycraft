@@ -2194,6 +2194,17 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       },
       [],
     );
+    // Next page and Retry unmount while loading; when focus fell to the page, put it on the results.
+    const registryResults = React.useRef(null as HTMLElement | null);
+    const registryWasBusy = React.useRef(false);
+    React.useEffect(() => {
+      const finished = registryWasBusy.current && !registryBusy;
+      registryWasBusy.current = registryBusy;
+      if (!finished || typeof document === 'undefined') return;
+      const active = document.activeElement;
+      if (!active || active === document.body)
+        registryResults.current?.focus?.();
+    }, [registryBusy]);
     const searchRegistry = async (cursor?: string) => {
       registryAbort.current?.abort();
       const controller = new AbortController();
@@ -2654,136 +2665,146 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         ),
       ),
       registryBusy ? h('p', { role: 'status' }, t('loading')) : null,
-      registryError
-        ? h(
-            'div',
-            { role: 'alert' },
-            registryError,
-            h(
-              'button',
-              { type: 'button', onClick: () => void searchRegistry() },
-              t('retry'),
-            ),
-          )
-        : null,
-      registry && !registryBusy
-        ? h(
-            'div',
-            null,
-            !registry.servers?.length
-              ? h('p', { role: 'status' }, t('registryEmpty'))
-              : null,
-            ...(registry.servers || []).map((server: any) => {
-              const identity = `${server.name}@${server.version}`;
-              const remotes = (server.remotes || []).filter(
-                (remote: any) =>
-                  remote.type === 'streamable-http' &&
-                  /^https?:\/\//i.test(remote.url),
-              );
-              return h(
-                'article',
-                {
-                  key: identity,
-                  className: 'waycraft-mcp-panel',
-                  style: {
-                    borderBlockEnd: '1px solid var(--dsw-alias-border-l3)',
-                    paddingBlock: '12px',
+      h(
+        'div',
+        { ref: registryResults, tabIndex: -1 },
+        registryError
+          ? h(
+              'div',
+              { role: 'alert' },
+              registryError,
+              h(
+                'button',
+                { type: 'button', onClick: () => void searchRegistry() },
+                t('retry'),
+              ),
+            )
+          : null,
+        registry && !registryBusy
+          ? h(
+              'div',
+              null,
+              !registry.servers?.length
+                ? h('p', { role: 'status' }, t('registryEmpty'))
+                : null,
+              ...(registry.servers || []).map((server: any) => {
+                const identity = `${server.name}@${server.version}`;
+                const remotes = (server.remotes || []).filter(
+                  (remote: any) =>
+                    remote.type === 'streamable-http' &&
+                    /^https?:\/\//i.test(remote.url),
+                );
+                return h(
+                  'article',
+                  {
+                    key: identity,
+                    className: 'waycraft-mcp-panel',
+                    style: {
+                      borderBlockEnd: '1px solid var(--dsw-alias-border-l3)',
+                      paddingBlock: '12px',
+                    },
                   },
-                },
-                h(
-                  'div',
-                  { className: 'waycraft-mcp-row' },
-                  h('strong', null, ltr(server.name)),
                   h(
-                    'span',
-                    { className: 'waycraft-mcp-meta' },
-                    ltr(server.version),
+                    'div',
+                    { className: 'waycraft-mcp-row' },
+                    h('strong', null, ltr(server.name)),
+                    h(
+                      'span',
+                      { className: 'waycraft-mcp-meta' },
+                      ltr(server.version),
+                    ),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        'aria-expanded': registryDetail === identity,
+                        onClick: () =>
+                          setRegistryDetail(
+                            registryDetail === identity ? '' : identity,
+                          ),
+                      },
+                      t('registryDetails'),
+                    ),
                   ),
                   h(
+                    'p',
+                    { className: 'waycraft-mcp-note', dir: 'auto' },
+                    server.description,
+                  ),
+                  registryDetail === identity
+                    ? h(
+                        'div',
+                        { className: 'waycraft-mcp-stack' },
+                        h(
+                          'span',
+                          { className: 'waycraft-mcp-meta' },
+                          t('registryTitle'),
+                        ),
+                        !remotes.length
+                          ? h('p', null, t('registryManual'))
+                          : h(
+                              'p',
+                              { className: 'waycraft-mcp-note' },
+                              t('registryHeaders'),
+                            ),
+                        ...remotes.map((remote: any, index: number) =>
+                          h(
+                            'div',
+                            { key: index, className: 'waycraft-mcp-row' },
+                            ltr(remote.url),
+                            h(
+                              'button',
+                              {
+                                type: 'button',
+                                onClick: () =>
+                                  setForm({
+                                    key: `registry-${identity}-${index}`,
+                                    original: null,
+                                    initial: emptyForm({
+                                      transport: 'streamable-http',
+                                      serverName: server.name
+                                        .replace(/[^a-zA-Z0-9_-]/g, '-')
+                                        .slice(0, 64),
+                                      url: remote.url,
+                                      registryReview: true,
+                                      registryRequiredHeaders: remote.headers
+                                        .filter(
+                                          (header: any) => header.required,
+                                        )
+                                        .map((header: any) => header.name),
+                                      headers: remote.headers
+                                        .filter(
+                                          (header: any) => header.required,
+                                        )
+                                        .map(
+                                          (header: any) => `${header.name}: `,
+                                        )
+                                        .join('\n'),
+                                    }),
+                                  }),
+                              },
+                              t('registryReview'),
+                            ),
+                          ),
+                        ),
+                      )
+                    : null,
+                );
+              }),
+              registry.nextCursor
+                ? h(
                     'button',
                     {
                       type: 'button',
-                      'aria-expanded': registryDetail === identity,
-                      onClick: () =>
-                        setRegistryDetail(
-                          registryDetail === identity ? '' : identity,
-                        ),
+                      disabled: registryBusy,
+                      onClick: () => void searchRegistry(registry.nextCursor),
                     },
-                    t('registryDetails'),
-                  ),
-                ),
-                h(
-                  'p',
-                  { className: 'waycraft-mcp-note', dir: 'auto' },
-                  server.description,
-                ),
-                registryDetail === identity
-                  ? h(
-                      'div',
-                      { className: 'waycraft-mcp-stack' },
-                      h(
-                        'span',
-                        { className: 'waycraft-mcp-meta' },
-                        t('registryTitle'),
-                      ),
-                      !remotes.length
-                        ? h('p', null, t('registryManual'))
-                        : h(
-                            'p',
-                            { className: 'waycraft-mcp-note' },
-                            t('registryHeaders'),
-                          ),
-                      ...remotes.map((remote: any, index: number) =>
-                        h(
-                          'div',
-                          { key: index, className: 'waycraft-mcp-row' },
-                          ltr(remote.url),
-                          h(
-                            'button',
-                            {
-                              type: 'button',
-                              onClick: () =>
-                                setForm({
-                                  key: `registry-${identity}-${index}`,
-                                  original: null,
-                                  initial: emptyForm({
-                                    transport: 'streamable-http',
-                                    serverName: server.name
-                                      .replace(/[^a-zA-Z0-9_-]/g, '-')
-                                      .slice(0, 64),
-                                    url: remote.url,
-                                    registryReview: true,
-                                    registryRequiredHeaders: remote.headers
-                                      .filter((header: any) => header.required)
-                                      .map((header: any) => header.name),
-                                    headers: remote.headers
-                                      .filter((header: any) => header.required)
-                                      .map((header: any) => `${header.name}: `)
-                                      .join('\n'),
-                                  }),
-                                }),
-                            },
-                            t('registryReview'),
-                          ),
-                        ),
-                      ),
-                    )
-                  : null,
-              );
-            }),
-            registry.nextCursor
-              ? h(
-                  'button',
-                  {
-                    type: 'button',
-                    disabled: registryBusy,
-                    onClick: () => void searchRegistry(registry.nextCursor),
-                  },
-                  t('registryNext'),
-                )
-              : null,
-          )
-        : null,
+                    t('registryNext'),
+                  )
+                : null,
+            )
+          : null,
+      ),
     );
 
     const discoveryArea = h(
