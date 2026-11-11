@@ -59,7 +59,7 @@ Settings are stored per-browser/desktop profile in `localStorage` (`dsh-waycraft
 
 ## Components
 
-Waycraft is one plugin made of separate Loader rows; each can be switched off without disabling the plugin. The Subscriptions and Skill manager rows are disabled by default.
+Waycraft is one plugin made of separate Loader rows; each can be switched off without disabling the plugin. The Subscriptions, Skill manager and MCP manager rows are disabled by default.
 
 - **Subscriptions** (Loader row `waycraft-subscriptions`): Codex, Claude, Grok, Copilot, Antigravity and OpenCode Zen account sign-in, model routing, usage badge and speed control, plus the Codex image, video and X search tools.
 - **Skill manager** (Loader row `waycraft-skills`): one place to see, enable and organise the skills DSH can read.
@@ -69,6 +69,11 @@ Waycraft is one plugin made of separate Loader rows; each can be switched off wi
   - Repositories: subscribe to Git repositories and install tracked copies, with update and rollback.
   - Catalogs: browse ClawHub and skills.sh and install into a chosen destination.
   - Model tool: `dsh_waycraft_create_skill` (asks for approval before it creates a skill).
+- **MCP manager** (Loader row `waycraft-mcp`): manage the MCP servers in DSH's configuration from Settings.
+  - Servers: add, edit, trash, restore and permanently delete stdio and streamable HTTP servers. Secrets are entered as `${credential:REF}` references, never as plaintext.
+  - Trust and testing: a server is trusted for the configuration you reviewed; connection tests run only when you ask and only for trusted servers. The tool list is read-only and cached.
+  - Discover and import: import JSON with a preview, find configurations in a folder, or search the Official MCP Registry. Nothing is connected, installed or trusted automatically.
+  - Not included yet: enabling or disabling individual tools, project-scoped servers. The "Configured off" switch records the configuration; DSH's runtime enforcement of it is not verified.
 
 ## Identity and upgrade compatibility
 
