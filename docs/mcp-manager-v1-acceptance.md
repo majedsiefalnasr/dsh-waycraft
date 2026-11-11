@@ -4,6 +4,8 @@ Status: Gate 2 verified again on 2026-11-11; Gate 3 remains open. Owner separate
 
 ## Latest release-gate evidence — 2026-11-11
 
+Final tab-accessibility repair verification: `npm run ci` passed **1429/1429 tests, zero skips**, formatting/lint/all TypeScript projects and fresh-build byte comparison. Built Chromium MCP/Registry passed **14/14, zero skips**. The new DOM regression failed before the fix, then passed for area/detail Arrow/Home/End selection and actual focus in English/Arabic; tabs and panels now have unique linked IDs. Package dry-run remains 128 files without forbidden material. Assembled client SHA-256: `d634ab3eb85e669aea42e21df9de1f9235e1bd2c2a77c4c7b1299db10e5f7df5`. This new tab repair is not yet installed; the earlier Desktop modal-focus proof applies to the preceding installed candidate only. Independent human reviews, screen-reader/contrast audit and consolidated Owner acceptance remain outstanding. No criteria are silently waived.
+
 - Clean locked dependencies installed; canonical `npm run build` now regenerates both Subscriptions and MCP browser factories plus host modules.
 - `npm run ci` passed: formatting, lint, all TypeScript projects, **1424/1424 tests with zero skips**, and a fresh-build byte comparison with no orphan artifacts.
 - Built-artifact Chromium fixtures passed **13/13 with zero skips**, covering MCP UI and Official Registry flows, English/Arabic, narrow/wide layouts and component absence. These fixtures are not authenticated installed-host proof.
@@ -64,10 +66,10 @@ Environment: macOS (darwin), Node v24.22.2, repo worktree `imp/ticket-16` with M
 ## Reviews / build / packaging / provenance
 
 - Standards + Spec reviews: run as subagent reports for `fb02062..feat/mcp-manager` (attach findings to issue/PR review). Independent human review still required for Gate 2/3 completion claims.
-- Typecheck/lint: environment-dependent in worktrees without local toolchain resolution; capture command output in final report.
-- Fresh-build byte comparison: **not executed** as a reproducible full-package comparison in this pass.
-- Packaging allowlist: `package.json` `files/exports` include MCP client/locale entries; verify against release checklist before any publish (not authorized).
-- Build provenance: follow repo release process; **not verified** in this pass.
+- Typecheck/lint and fresh-build byte comparison: passed in the canonical `npm run ci` run after the shared-modal fix (1425 tests, zero skips). The 1424 count above predates that fix; subsequent accessibility fixes require their own final gate run.
+- Packaging allowlist rechecked on 2026-11-11 at `cbd4879`: `npm pack --dry-run --json` reported 128 files, all eleven MCP artifacts and both locales, with no scratch, test, node_modules, rollback backups or Finder metadata. No package was published.
+- Source/build traceability: canonical locked-dependency build and fresh comparison link the candidate source to committed artifacts. This is not registry publication provenance; npm OIDC provenance can only be verified after the separately authorized release pipeline executes.
+- A bounded independent accessibility review at `cbd4879` found missing keyboard navigation and tab-panel naming associations in both tab widgets. This is a blocking finding under repair, not a passing audit. Independent agent reviews do not satisfy the required human reviews or manual screen-reader/contrast audit.
 
 ## Gate 3 — Owner Acceptance
 

@@ -2159,6 +2159,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   }
 
   function McpPanel() {
+    const tabScope = React.useId();
     const [state, setState] = React.useState({ kind: 'loading' } as any);
     const [servers, setServers] = React.useState([] as any[]);
     const [trashed, setTrashed] = React.useState([] as any[]);
@@ -3506,8 +3507,35 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
                 key: id,
                 type: 'button',
                 role: 'tab',
+                id: `${tabScope}-detail-tab-${id}`,
+                'aria-controls': `${tabScope}-detail-panel-${id}`,
                 'aria-selected': tab === id,
                 tabIndex: tab === id ? 0 : -1,
+                onKeyDown: (e: any) => {
+                  if (
+                    ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)
+                  ) {
+                    e.preventDefault();
+                    const ids = [
+                      'overview',
+                      'tools',
+                      'configuration',
+                      'security',
+                    ];
+                    const step =
+                      (e.key === 'ArrowRight' ? 1 : -1) * (isArabic() ? -1 : 1);
+                    const next =
+                      e.key === 'Home'
+                        ? 0
+                        : e.key === 'End'
+                          ? 3
+                          : (ids.indexOf(id) + step + ids.length) % ids.length;
+                    setTab(ids[next]);
+                    e.currentTarget.parentElement
+                      ?.querySelectorAll?.('[role="tab"]')
+                      ?.[next]?.focus?.();
+                  }
+                },
                 onClick: () => setTab(id),
               },
               t(id === 'security' ? 'security' : id),
@@ -3517,7 +3545,12 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         tab === 'overview'
           ? h(
               'div',
-              { role: 'tabpanel', className: 'waycraft-mcp-panel' },
+              {
+                role: 'tabpanel',
+                id: `${tabScope}-detail-panel-${tab}`,
+                'aria-labelledby': `${tabScope}-detail-tab-${tab}`,
+                className: 'waycraft-mcp-panel',
+              },
               h(
                 'dl',
                 { className: 'waycraft-mcp-kv' },
@@ -3548,7 +3581,12 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         tab === 'tools'
           ? h(
               'div',
-              { role: 'tabpanel', className: 'waycraft-mcp-panel' },
+              {
+                role: 'tabpanel',
+                id: `${tabScope}-detail-panel-${tab}`,
+                'aria-labelledby': `${tabScope}-detail-tab-${tab}`,
+                className: 'waycraft-mcp-panel',
+              },
               h('p', { className: 'waycraft-mcp-note' }, t('readOnlyTools')),
               h(
                 'div',
@@ -3651,7 +3689,12 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         tab === 'configuration'
           ? h(
               'div',
-              { role: 'tabpanel', className: 'waycraft-mcp-panel' },
+              {
+                role: 'tabpanel',
+                id: `${tabScope}-detail-panel-${tab}`,
+                'aria-labelledby': `${tabScope}-detail-tab-${tab}`,
+                className: 'waycraft-mcp-panel',
+              },
               h(
                 'pre',
                 { className: 'waycraft-mcp-pre' },
@@ -3671,7 +3714,12 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         tab === 'security'
           ? h(
               'div',
-              { role: 'tabpanel', className: 'waycraft-mcp-panel' },
+              {
+                role: 'tabpanel',
+                id: `${tabScope}-detail-panel-${tab}`,
+                'aria-labelledby': `${tabScope}-detail-tab-${tab}`,
+                className: 'waycraft-mcp-panel',
+              },
               h(
                 'dl',
                 { className: 'waycraft-mcp-kv' },
@@ -3908,8 +3956,30 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
               key: id,
               type: 'button',
               role: 'tab',
+              id: `${tabScope}-area-tab-${id}`,
+              'aria-controls': `${tabScope}-area-panel-${id}`,
               'aria-selected': area === id,
               tabIndex: area === id ? 0 : -1,
+              onKeyDown: (e: any) => {
+                if (
+                  ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)
+                ) {
+                  e.preventDefault();
+                  const ids = ['servers', 'discover', 'trash'];
+                  const step =
+                    (e.key === 'ArrowRight' ? 1 : -1) * (isArabic() ? -1 : 1);
+                  const next =
+                    e.key === 'Home'
+                      ? 0
+                      : e.key === 'End'
+                        ? 2
+                        : (ids.indexOf(id) + step + ids.length) % ids.length;
+                  setArea(ids[next]);
+                  e.currentTarget.parentElement
+                    ?.querySelectorAll?.('[role="tab"]')
+                    ?.[next]?.focus?.();
+                }
+              },
               onClick: () => setArea(id),
             },
             icon(
@@ -3928,7 +3998,17 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
           ),
         ),
       ),
-      area === 'servers' ? serversArea : null,
+      area === 'servers'
+        ? h(
+            'div',
+            {
+              role: 'tabpanel',
+              id: `${tabScope}-area-panel-servers`,
+              'aria-labelledby': `${tabScope}-area-tab-servers`,
+            },
+            serversArea,
+          )
+        : null,
       form
         ? h(ServerFormDialog, {
             key: String(form.key),
@@ -3968,7 +4048,12 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       area === 'discover'
         ? h(
             'div',
-            { className: 'waycraft-mcp-stack' },
+            {
+              className: 'waycraft-mcp-stack',
+              role: 'tabpanel',
+              id: `${tabScope}-area-panel-discover`,
+              'aria-labelledby': `${tabScope}-area-tab-discover`,
+            },
             registryArea,
             h(
               'details',
@@ -3983,7 +4068,17 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
             ),
           )
         : null,
-      area === 'trash' ? trashArea : null,
+      area === 'trash'
+        ? h(
+            'div',
+            {
+              role: 'tabpanel',
+              id: `${tabScope}-area-panel-trash`,
+              'aria-labelledby': `${tabScope}-area-tab-trash`,
+            },
+            trashArea,
+          )
+        : null,
       confirmUi,
     );
   }

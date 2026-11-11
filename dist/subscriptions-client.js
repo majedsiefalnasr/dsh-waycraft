@@ -5609,6 +5609,7 @@ function setupMcp(ctx, fail) {
 		return host ? host.dom.createPortal(node, host.body) : node;
 	}
 	function McpPanel() {
+		const tabScope = React.useId();
 		const [state, setState] = React.useState({ kind: "loading" });
 		const [servers, setServers] = React.useState([]);
 		const [trashed, setTrashed] = React.useState([]);
@@ -6361,14 +6362,40 @@ function setupMcp(ctx, fail) {
 			key: id,
 			type: "button",
 			role: "tab",
+			id: `${tabScope}-detail-tab-${id}`,
+			"aria-controls": `${tabScope}-detail-panel-${id}`,
 			"aria-selected": tab === id,
 			tabIndex: tab === id ? 0 : -1,
+			onKeyDown: (e) => {
+				if ([
+					"ArrowLeft",
+					"ArrowRight",
+					"Home",
+					"End"
+				].includes(e.key)) {
+					e.preventDefault();
+					const ids = [
+						"overview",
+						"tools",
+						"configuration",
+						"security"
+					];
+					const step = (e.key === "ArrowRight" ? 1 : -1) * (isArabic() ? -1 : 1);
+					const next = e.key === "Home" ? 0 : e.key === "End" ? 3 : (ids.indexOf(id) + step + ids.length) % ids.length;
+					setTab(ids[next]);
+					e.currentTarget.parentElement?.querySelectorAll?.("[role=\"tab\"]")?.[next]?.focus?.();
+				}
+			},
 			onClick: () => setTab(id)
 		}, t(id === "security" ? "security" : id)))), tab === "overview" ? h("div", {
 			role: "tabpanel",
+			id: `${tabScope}-detail-panel-${tab}`,
+			"aria-labelledby": `${tabScope}-detail-tab-${tab}`,
 			className: "waycraft-mcp-panel"
 		}, h("dl", { className: "waycraft-mcp-kv" }, h("dt", null, t("status")), h("dd", null, statusLabel(current$1)), h("dt", null, t("trustState")), h("dd", null, trustLabel(current$1.trust)), h("dt", null, t("transport")), h("dd", null, ltr(current$1.config?.transport)), h("dt", null, t("savedState")), h("dd", null, savedLabel(current$1)), h("dt", null, t("runtimeState")), h("dd", null, t("statusRestart")), h("dt", null, t("testOutcome")), h("dd", null, testLabel(testResults[current$1.serverName]?.config === configIdentity(current$1) ? testResults[current$1.serverName] : void 0)))) : null, tab === "tools" ? h("div", {
 			role: "tabpanel",
+			id: `${tabScope}-detail-panel-${tab}`,
+			"aria-labelledby": `${tabScope}-detail-tab-${tab}`,
 			className: "waycraft-mcp-panel"
 		}, h("p", { className: "waycraft-mcp-note" }, t("readOnlyTools")), h("div", { className: "waycraft-mcp-row" }, toolsRead.error && toolsRead.key === toolsKey ? h("button", {
 			type: "button",
@@ -6401,12 +6428,16 @@ function setupMcp(ctx, fail) {
 			return h("div", { className: "waycraft-mcp-tools" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("toolName")), h("th", null, t("toolDescription")))), h("tbody", null, ...tools.map((tool) => h("tr", { key: tool.name }, h("td", null, ltr(tool.name)), h("td", null, tool.description || ""))))));
 		})()) : null, tab === "configuration" ? h("div", {
 			role: "tabpanel",
+			id: `${tabScope}-detail-panel-${tab}`,
+			"aria-labelledby": `${tabScope}-detail-tab-${tab}`,
 			className: "waycraft-mcp-panel"
 		}, h("pre", { className: "waycraft-mcp-pre" }, JSON.stringify(current$1.config || {}, null, 2)), current$1.limitation || current$1.trash?.limitation ? h("p", {
 			role: "status",
 			className: "waycraft-mcp-note"
 		}, t("limitation"), ": ", current$1.limitation || current$1.trash?.limitation) : null) : null, tab === "security" ? h("div", {
 			role: "tabpanel",
+			id: `${tabScope}-detail-panel-${tab}`,
+			"aria-labelledby": `${tabScope}-detail-tab-${tab}`,
 			className: "waycraft-mcp-panel"
 		}, h("dl", { className: "waycraft-mcp-kv" }, h("dt", null, t("trustState")), h("dd", null, trustLabel(current$1.trust)), h("dt", null, t("fingerprint")), h("dd", null, ltr(current$1.reviewedConfigFingerprint || current$1.trust?.reviewedFingerprint || "")), h("dt", null, t("ownership")), h("dd", null, ownershipLabel(current$1.ownership))), current$1.trash?.trashed ? h("p", { className: "waycraft-mcp-note" }, t("trashedAt"), ": ", ltr(current$1.trash.trashedAt || "")) : null, current$1.trash?.limitation ? h("p", {
 			role: "status",
@@ -6507,10 +6538,35 @@ function setupMcp(ctx, fail) {
 			key: id,
 			type: "button",
 			role: "tab",
+			id: `${tabScope}-area-tab-${id}`,
+			"aria-controls": `${tabScope}-area-panel-${id}`,
 			"aria-selected": area === id,
 			tabIndex: area === id ? 0 : -1,
+			onKeyDown: (e) => {
+				if ([
+					"ArrowLeft",
+					"ArrowRight",
+					"Home",
+					"End"
+				].includes(e.key)) {
+					e.preventDefault();
+					const ids = [
+						"servers",
+						"discover",
+						"trash"
+					];
+					const step = (e.key === "ArrowRight" ? 1 : -1) * (isArabic() ? -1 : 1);
+					const next = e.key === "Home" ? 0 : e.key === "End" ? 2 : (ids.indexOf(id) + step + ids.length) % ids.length;
+					setArea(ids[next]);
+					e.currentTarget.parentElement?.querySelectorAll?.("[role=\"tab\"]")?.[next]?.focus?.();
+				}
+			},
 			onClick: () => setArea(id)
-		}, icon(ICON[id === "servers" ? "servers" : id === "discover" ? "search" : "trash"]), label, id === "trash" && trashed.length ? h("span", { className: "waycraft-mcp-badge" }, trashed.length) : ""))), area === "servers" ? serversArea : null, form ? h(ServerFormDialog, {
+		}, icon(ICON[id === "servers" ? "servers" : id === "discover" ? "search" : "trash"]), label, id === "trash" && trashed.length ? h("span", { className: "waycraft-mcp-badge" }, trashed.length) : ""))), area === "servers" ? h("div", {
+			role: "tabpanel",
+			id: `${tabScope}-area-panel-servers`,
+			"aria-labelledby": `${tabScope}-area-tab-servers`
+		}, serversArea) : null, form ? h(ServerFormDialog, {
 			key: String(form.key),
 			initial: form.initial,
 			original: form.original,
@@ -6537,10 +6593,19 @@ function setupMcp(ctx, fail) {
 		}) : null, importOpen ? h(ImportDialog, {
 			onClose: closeImport,
 			suspended: !!confirm
-		}, importArea) : null, area === "discover" ? h("div", { className: "waycraft-mcp-stack" }, registryArea, h("details", null, h("summary", null, t("discoverTitle")), discoveryArea), h("button", {
+		}, importArea) : null, area === "discover" ? h("div", {
+			className: "waycraft-mcp-stack",
+			role: "tabpanel",
+			id: `${tabScope}-area-panel-discover`,
+			"aria-labelledby": `${tabScope}-area-tab-discover`
+		}, registryArea, h("details", null, h("summary", null, t("discoverTitle")), discoveryArea), h("button", {
 			type: "button",
 			onClick: () => setImportOpen(true)
-		}, t("importTitle"))) : null, area === "trash" ? trashArea : null, confirmUi);
+		}, t("importTitle"))) : null, area === "trash" ? h("div", {
+			role: "tabpanel",
+			id: `${tabScope}-area-panel-trash`,
+			"aria-labelledby": `${tabScope}-area-tab-trash`
+		}, trashArea) : null, confirmUi);
 	}
 	effect(() => {
 		let off;

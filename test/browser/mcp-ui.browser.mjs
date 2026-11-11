@@ -621,6 +621,63 @@ describe('MCP manager in a real browser', { skip }, () => {
     await page.close();
   });
 
+  test('area and detail tabs support keyboard navigation in EN/AR', async () => {
+    for (const lang of ['en', 'ar']) {
+      const page = await open(lang);
+      const area = page.getByRole('tablist').first();
+      const first = area.getByRole('tab').first();
+      await first.focus();
+      await page.keyboard.press(lang === 'ar' ? 'ArrowLeft' : 'ArrowRight');
+      assert.equal(
+        await area.getByRole('tab').nth(1).getAttribute('aria-selected'),
+        'true',
+      );
+      assert.ok(
+        await area
+          .getByRole('tab')
+          .nth(1)
+          .evaluate((e) => e === document.activeElement),
+      );
+      await page.keyboard.press('End');
+      assert.equal(
+        await area.getByRole('tab').last().getAttribute('aria-selected'),
+        'true',
+      );
+      await page.keyboard.press('Home');
+      assert.equal(await first.getAttribute('aria-selected'), 'true');
+      await page
+        .locator('.waycraft-mcp-row-head')
+        .first()
+        .getByRole('button')
+        .first()
+        .click();
+      const detail = page.getByRole('tablist').nth(1);
+      await detail.getByRole('tab').first().focus();
+      await page.keyboard.press(lang === 'ar' ? 'ArrowLeft' : 'ArrowRight');
+      const selected = detail.getByRole('tab').nth(1);
+      assert.equal(await selected.getAttribute('aria-selected'), 'true');
+      assert.ok(await selected.evaluate((e) => e === document.activeElement));
+      const panelId = await selected.getAttribute('aria-controls');
+      assert.ok(panelId);
+      const panel = page.locator(`[id="${panelId}"]`);
+      assert.equal(
+        await panel.getAttribute('aria-labelledby'),
+        await selected.getAttribute('id'),
+      );
+      await page.keyboard.press('End');
+      assert.equal(
+        await detail.getByRole('tab').last().getAttribute('aria-selected'),
+        'true',
+      );
+      await page.keyboard.press('Home');
+      assert.equal(
+        await detail.getByRole('tab').first().getAttribute('aria-selected'),
+        'true',
+      );
+      await page.close();
+    }
+  });
+
   test('Arabic renders right-to-left', async () => {
     const page = await open('ar');
     assert.equal(

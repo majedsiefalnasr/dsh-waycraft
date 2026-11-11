@@ -167,6 +167,67 @@ async function renderPanel(lang) {
   return renderer;
 }
 
+for (const kind of ['area', 'detail']) {
+  for (const lang of ['en', 'ar']) {
+    test(`MCP ${kind} tabs ${lang}: arrows and Home/End select a tab and request focus`, async () => {
+      const renderer = await renderPanel(lang);
+      try {
+        if (kind === 'detail') await expandFirst(renderer);
+        const indexes = kind === 'area' ? [0, 1, 2] : [0, 1, 2, 3];
+        const last = kind === 'area' ? 2 : 3;
+        const tabs = () =>
+          findAll(renderer.toJSON(), (n) => n.props?.role === 'tablist')[
+            kind === 'area' ? 0 : 1
+          ].children;
+        // Component seam: focus calls are recorded, not real DOM focus.
+        let focused = -1;
+        async function press(key, expected) {
+          const current = tabs().findIndex((n) => n.props['aria-selected']);
+          let prevented = false;
+          await act(async () => {
+            tabs()[current].props.onKeyDown({
+              key,
+              preventDefault: () => {
+                prevented = true;
+              },
+              currentTarget: {
+                parentElement: {
+                  querySelectorAll: () =>
+                    tabs().map((_, i) => ({
+                      focus: () => {
+                        focused = i;
+                      },
+                    })),
+                },
+              },
+            });
+            await Promise.resolve();
+          });
+          assert.equal(prevented, expected !== null);
+          assert.equal(focused, expected === null ? current : expected);
+          assert.deepEqual(
+            tabs().map((n) => n.props['aria-selected']),
+            indexes.map((i) => i === (expected ?? current)),
+          );
+          assert.deepEqual(
+            tabs().map((n) => n.props.tabIndex),
+            indexes.map((i) => (i === (expected ?? current) ? 0 : -1)),
+          );
+        }
+        await press('ArrowRight', lang === 'ar' ? last : 1);
+        await press('Home', 0);
+        await press('ArrowLeft', lang === 'ar' ? 1 : last);
+        await press('End', last);
+        await press('ArrowRight', lang === 'ar' ? last - 1 : 0);
+        await press('Home', 0);
+        await press('ArrowDown', null);
+      } finally {
+        await act(async () => renderer.unmount());
+      }
+    });
+  }
+}
+
 test('#174 browser integration EN: server-centric UI renders, read-only tools, accurate trash labels, no scope/per-tool controls', async () => {
   const renderer = await renderPanel('en');
   await expandFirst(renderer);

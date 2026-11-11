@@ -106,6 +106,8 @@ Mark each: **Pass / Fail / N/A** with notes and evidence (screenshot/log referen
 
 ## Required follow-ups outside this manual session
 
+Evidence update (2026-11-11, candidate `cbd4879`): the canonical full CI run passed 1425 tests with zero skips, including fresh-build byte comparison; built Chromium fixtures passed 13/13. The package dry-run allowlist contains 128 files with no private/rollback/test/cache material. Source-to-artifact traceability was checked using the canonical locked-dependency build; npm publication provenance is a later pipeline result, not yet available. Actual Desktop CRUD/import/Registry and modal-focus results are recorded in `docs/ai/mcp-desktop-gate3-20261111.md`. A subsequent accessibility review identified missing tab-widget keyboard navigation and naming associations; repair and final regression verification remain necessary. These results do not substitute for the human reviews or Owner decision below.
+
 These remain open for #176 unless separately completed and evidenced:
 - Independent **human** Standards and Spec reviews.
 - **Fresh-build byte comparison**.

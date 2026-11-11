@@ -3,6 +3,8 @@
 
 ## Unreleased
 
+- MCP area and server-detail tabs now move focus and selection together with Left/Right arrows (mirrored in Arabic RTL), Home and End. Component regressions cover keyboard handler semantics; real-browser focus verification remains pending.
+
 - MCP Add/Edit, Import and confirmation dialogs now join DSH's public shared modal layer when available, so Settings yields Tab and Escape ownership. Parent dialogs yield while discard confirmation is open, and close callbacks use current draft state. Older hosts keep local focus handling. Real Desktop revalidation remains pending.
 
 - MCP release-gate repairs: canonical builds now regenerate both browser factories, the explicit-probe SDK is a declared runtime dependency, and MCP tests use package dependencies and built artifacts instead of private worktrees or concurrent writes into `dist`. Fixed stale Tools hydration overwriting a newer explicit refresh and prevented Import previews from attaching to obsolete input/file reads. Full release and desktop acceptance remain pending.
