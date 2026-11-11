@@ -5078,6 +5078,7 @@ function setupMcp(ctx, fail) {
 		const ref = React.useRef(null);
 		const [opener] = React.useState(() => typeof document !== "undefined" ? document.activeElement : null);
 		React.useEffect(() => {
+			if (primitives$1.useModalLayer) return;
 			ref.current?.focus?.();
 			return () => {
 				try {
@@ -5104,6 +5105,7 @@ function setupMcp(ctx, fail) {
 			if (dirty) setConfirmDiscard(true);
 			else props.onClose();
 		};
+		primitives$1.useModalLayer?.(ref, !confirmDiscard, requestClose);
 		const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex=\"-1\"])";
 		const trapTab = (event) => {
 			const items = Array.from(ref.current?.querySelectorAll?.(FOCUSABLE) || []);
@@ -5116,7 +5118,8 @@ function setupMcp(ctx, fail) {
 				(wrapBack ? items[items.length - 1] : items[0]).focus?.();
 			}
 		};
-		const onKeyDown = (event) => {
+		const onKeyDown = primitives$1.useModalLayer ? void 0 : (event) => {
+			if (confirmDiscard) return;
 			if (event.key === "Escape") {
 				event.stopPropagation?.();
 				requestClose();
@@ -5297,10 +5300,12 @@ function setupMcp(ctx, fail) {
 		const host = portalTarget();
 		return host ? host.dom.createPortal(overlay, host.body) : overlay;
 	}
-	function useModal(onEscape) {
+	function useModal(onEscape, open = true) {
 		const ref = React.useRef(null);
+		primitives$1.useModalLayer?.(ref, open, onEscape);
 		const [opener] = React.useState(() => typeof document !== "undefined" ? document.activeElement : null);
 		React.useEffect(() => {
+			if (primitives$1.useModalLayer) return;
 			(ref.current?.querySelector?.(".waycraft-mcp-dialog-footer button:not([disabled])") || ref.current)?.focus?.();
 			return () => {
 				try {
@@ -5308,26 +5313,26 @@ function setupMcp(ctx, fail) {
 				} catch {}
 			};
 		}, []);
-		const onKeyDown = (event) => {
-			if (event.key === "Escape") {
-				event.stopPropagation?.();
-				onEscape();
-				return;
-			}
-			if (event.key !== "Tab") return;
-			const items = Array.from(ref.current?.querySelectorAll?.("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex=\"-1\"])") || []);
-			if (!items.length) return;
-			const index = items.indexOf(event.target);
-			const back = event.shiftKey && index <= 0;
-			const forward = !event.shiftKey && (index === -1 || index === items.length - 1);
-			if (back || forward) {
-				event.preventDefault?.();
-				(back ? items[items.length - 1] : items[0]).focus?.();
-			}
-		};
 		return {
 			ref,
-			onKeyDown
+			onKeyDown: primitives$1.useModalLayer ? void 0 : (event) => {
+				if (!open) return;
+				if (event.key === "Escape") {
+					event.stopPropagation?.();
+					onEscape();
+					return;
+				}
+				if (event.key !== "Tab") return;
+				const items = Array.from(ref.current?.querySelectorAll?.("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex=\"-1\"])") || []);
+				if (!items.length) return;
+				const index = items.indexOf(event.target);
+				const back = event.shiftKey && index <= 0;
+				const forward = !event.shiftKey && (index === -1 || index === items.length - 1);
+				if (back || forward) {
+					event.preventDefault?.();
+					(back ? items[items.length - 1] : items[0]).focus?.();
+				}
+			}
 		};
 	}
 	function ConfirmDialog(props) {
@@ -5364,7 +5369,7 @@ function setupMcp(ctx, fail) {
 		return host ? host.dom.createPortal(overlay, host.body) : overlay;
 	}
 	function ImportDialog(props) {
-		const { ref, onKeyDown } = useModal(props.onClose);
+		const { ref, onKeyDown } = useModal(props.onClose, !props.suspended);
 		const node = h("div", {
 			className: "waycraft-mcp waycraft-mcp-overlay",
 			inert: props.suspended ? true : void 0,
@@ -14555,6 +14560,7 @@ function setupMcp(ctx, fail) {
 		const ref = React.useRef(null);
 		const [opener] = React.useState(() => typeof document !== "undefined" ? document.activeElement : null);
 		React.useEffect(() => {
+			if (primitives.useModalLayer) return;
 			ref.current?.focus?.();
 			return () => {
 				try {
@@ -14581,6 +14587,7 @@ function setupMcp(ctx, fail) {
 			if (dirty) setConfirmDiscard(true);
 			else props.onClose();
 		};
+		primitives.useModalLayer?.(ref, !confirmDiscard, requestClose);
 		const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex=\"-1\"])";
 		const trapTab = (event) => {
 			const items = Array.from(ref.current?.querySelectorAll?.(FOCUSABLE) || []);
@@ -14593,7 +14600,8 @@ function setupMcp(ctx, fail) {
 				(wrapBack ? items[items.length - 1] : items[0]).focus?.();
 			}
 		};
-		const onKeyDown = (event) => {
+		const onKeyDown = primitives.useModalLayer ? void 0 : (event) => {
+			if (confirmDiscard) return;
 			if (event.key === "Escape") {
 				event.stopPropagation?.();
 				requestClose();
@@ -14774,10 +14782,12 @@ function setupMcp(ctx, fail) {
 		const host = portalTarget();
 		return host ? host.dom.createPortal(overlay, host.body) : overlay;
 	}
-	function useModal(onEscape) {
+	function useModal(onEscape, open = true) {
 		const ref = React.useRef(null);
+		primitives.useModalLayer?.(ref, open, onEscape);
 		const [opener] = React.useState(() => typeof document !== "undefined" ? document.activeElement : null);
 		React.useEffect(() => {
+			if (primitives.useModalLayer) return;
 			(ref.current?.querySelector?.(".waycraft-mcp-dialog-footer button:not([disabled])") || ref.current)?.focus?.();
 			return () => {
 				try {
@@ -14785,26 +14795,26 @@ function setupMcp(ctx, fail) {
 				} catch {}
 			};
 		}, []);
-		const onKeyDown = (event) => {
-			if (event.key === "Escape") {
-				event.stopPropagation?.();
-				onEscape();
-				return;
-			}
-			if (event.key !== "Tab") return;
-			const items = Array.from(ref.current?.querySelectorAll?.("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex=\"-1\"])") || []);
-			if (!items.length) return;
-			const index = items.indexOf(event.target);
-			const back = event.shiftKey && index <= 0;
-			const forward = !event.shiftKey && (index === -1 || index === items.length - 1);
-			if (back || forward) {
-				event.preventDefault?.();
-				(back ? items[items.length - 1] : items[0]).focus?.();
-			}
-		};
 		return {
 			ref,
-			onKeyDown
+			onKeyDown: primitives.useModalLayer ? void 0 : (event) => {
+				if (!open) return;
+				if (event.key === "Escape") {
+					event.stopPropagation?.();
+					onEscape();
+					return;
+				}
+				if (event.key !== "Tab") return;
+				const items = Array.from(ref.current?.querySelectorAll?.("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex=\"-1\"])") || []);
+				if (!items.length) return;
+				const index = items.indexOf(event.target);
+				const back = event.shiftKey && index <= 0;
+				const forward = !event.shiftKey && (index === -1 || index === items.length - 1);
+				if (back || forward) {
+					event.preventDefault?.();
+					(back ? items[items.length - 1] : items[0]).focus?.();
+				}
+			}
 		};
 	}
 	function ConfirmDialog(props) {
@@ -14841,7 +14851,7 @@ function setupMcp(ctx, fail) {
 		return host ? host.dom.createPortal(overlay, host.body) : overlay;
 	}
 	function ImportDialog(props) {
-		const { ref, onKeyDown } = useModal(props.onClose);
+		const { ref, onKeyDown } = useModal(props.onClose, !props.suspended);
 		const node = h("div", {
 			className: "waycraft-mcp waycraft-mcp-overlay",
 			inert: props.suspended ? true : void 0,

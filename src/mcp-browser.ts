@@ -1239,6 +1239,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
           : null) as any,
     );
     React.useEffect(() => {
+      if (primitives.useModalLayer) return;
       ref.current?.focus?.();
       return () => {
         try {
@@ -1276,6 +1277,10 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
       if (dirty) setConfirmDiscard(true);
       else props.onClose();
     };
+    // Register portaled dialogs above Settings in the shared host focus stack.
+    // The hook keeps requestClose current as dirty state changes.
+    primitives.useModalLayer?.(ref, !confirmDiscard, requestClose);
+    // Older hosts retain local focus ownership only when no shared hook is available.
     // Tab cycles inside the dialog so keyboard focus cannot reach the page behind the modal.
     const FOCUSABLE =
       'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
@@ -1293,12 +1298,15 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         (wrapBack ? items[items.length - 1] : items[0]).focus?.();
       }
     };
-    const onKeyDown = (event: any) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation?.();
-        requestClose();
-      } else if (event.key === 'Tab') trapTab(event);
-    };
+    const onKeyDown = primitives.useModalLayer
+      ? undefined
+      : (event: any) => {
+          if (confirmDiscard) return;
+          if (event.key === 'Escape') {
+            event.stopPropagation?.();
+            requestClose();
+          } else if (event.key === 'Tab') trapTab(event);
+        };
     // The label wraps only the caption and control, so help and error text are not part of the field's name.
     // Plaintext-secret errors show at once; other errors show after the field is touched or Save is attempted.
     // Saved secrets kept as stored (host-masked): the field is read-only and shows a note instead of [REDACTED].
@@ -1634,8 +1642,9 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
   }
 
   // Shared modal behaviour: focus in on open, Tab trapped, Escape closes, focus returns to the opener.
-  function useModal(onEscape: () => void) {
+  function useModal(onEscape: () => void, open = true) {
     const ref = React.useRef(null as any);
+    primitives.useModalLayer?.(ref, open, onEscape);
     const [opener] = React.useState(
       () =>
         (typeof document !== 'undefined'
@@ -1643,6 +1652,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
           : null) as any,
     );
     React.useEffect(() => {
+      if (primitives.useModalLayer) return;
       const first = ref.current?.querySelector?.(
         '.waycraft-mcp-dialog-footer button:not([disabled])',
       );
@@ -1655,28 +1665,31 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
         }
       };
     }, []);
-    const onKeyDown = (event: any) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation?.();
-        onEscape();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const items: any[] = Array.from(
-        ref.current?.querySelectorAll?.(
-          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-        ) || [],
-      );
-      if (!items.length) return;
-      const index = items.indexOf(event.target);
-      const back = event.shiftKey && index <= 0;
-      const forward =
-        !event.shiftKey && (index === -1 || index === items.length - 1);
-      if (back || forward) {
-        event.preventDefault?.();
-        (back ? items[items.length - 1] : items[0]).focus?.();
-      }
-    };
+    const onKeyDown = primitives.useModalLayer
+      ? undefined
+      : (event: any) => {
+          if (!open) return;
+          if (event.key === 'Escape') {
+            event.stopPropagation?.();
+            onEscape();
+            return;
+          }
+          if (event.key !== 'Tab') return;
+          const items: any[] = Array.from(
+            ref.current?.querySelectorAll?.(
+              'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+            ) || [],
+          );
+          if (!items.length) return;
+          const index = items.indexOf(event.target);
+          const back = event.shiftKey && index <= 0;
+          const forward =
+            !event.shiftKey && (index === -1 || index === items.length - 1);
+          if (back || forward) {
+            event.preventDefault?.();
+            (back ? items[items.length - 1] : items[0]).focus?.();
+          }
+        };
     return { ref, onKeyDown };
   }
 
@@ -1761,7 +1774,7 @@ function setupMcp(ctx: any, fail: (error: unknown) => void): void {
     suspended?: boolean;
     onClose: () => void;
   }) {
-    const { ref, onKeyDown } = useModal(props.onClose);
+    const { ref, onKeyDown } = useModal(props.onClose, !props.suspended);
     const node = h(
       'div',
       {
