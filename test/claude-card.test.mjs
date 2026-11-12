@@ -266,6 +266,7 @@ test('Claude account cards identify the stored access method', async () => {
     assert.ok(page.text().includes('2.1.322'));
     assert.ok(page.text().includes(page.dictionary.claudeOfficialCliWarning));
     assert.ok(page.text().includes(page.dictionary.warningInfo));
+    assert.ok(page.text().includes(page.dictionary.cliApiKeysRemoved));
     assert.equal(
       page.calls.some(
         (call) =>
@@ -289,7 +290,7 @@ test('Claude account cards identify the stored access method', async () => {
           node.tag === 'button' &&
           node.props['aria-label'] === page.dictionary.makeDefault,
       );
-    assert.equal(defaultButton.props.disabled, true);
+    assert.equal(defaultButton.props.disabled, false);
     assert.equal(page.has('addAccountKeychain'), false);
     assert.equal(
       page.text().includes(page.dictionary.claudeAddAccountHint),

@@ -7018,8 +7018,10 @@ var subscriptions$1 = {
 	"accessMethod": "Access method",
 	"cliLoginFailed": "CLI sign-in could not be verified. Review the terminal output, cancel this attempt, then try again.",
 	"cliAccountControlsPending": "Official CLI account removal will be available in a later update.",
+	"cliMaxConcurrent": "Concurrent CLI turns per account",
 	"cliTerminalInput": "CLI terminal input (Enter to send)",
 	"officialCli": "Official CLI",
+	"cliApiKeysRemoved": "Provider API-key variables (such as ANTHROPIC_API_KEY) are removed from the CLI's environment, so runs use this account's subscription.",
 	"claudeCliMissing": "Claude Code was not found. Install it yourself, then try again. No account has been created.",
 	"directSignIn": "Direct sign-in",
 	"warningInfo": "Information",
@@ -7699,8 +7701,10 @@ var subscriptions = {
 	"accessMethod": "طريقة الوصول",
 	"cliLoginFailed": "تعذّر التحقق من تسجيل الدخول. راجع مخرجات الطرفية، ثم ألغِ هذه المحاولة وأعد المحاولة.",
 	"cliAccountControlsPending": "ستتوفر إزالة حساب واجهة CLI الرسمية في تحديث لاحق.",
+	"cliMaxConcurrent": "عدد أدوار CLI المتزامنة لكل حساب",
 	"cliTerminalInput": "إدخال الطرفية (اضغط Enter للإرسال)",
 	"officialCli": "واجهة CLI الرسمية",
+	"cliApiKeysRemoved": "تُزال متغيرات مفاتيح API الخاصة بالمزود (مثل ANTHROPIC_API_KEY) من بيئة CLI، فتعمل الطلبات باشتراك هذا الحساب.",
 	"claudeCliMissing": "لم يُعثر على Claude Code. ثبّته بنفسك ثم أعد المحاولة. لم يُنشأ أي حساب.",
 	"directSignIn": "تسجيل الدخول المباشر",
 	"warningInfo": "معلومة",
@@ -11190,7 +11194,25 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 				setManager(false);
 				refreshStatus();
 			}
-		}) : null, part("card", styles$3.card, presentation !== "auth" && part("header", styles$3.cardHeader, providerStatus(h, t, error || status?.registrationError ? "error" : busy ? "warning" : !status ? "checking" : status?.accounts?.length ? "ready" : "warning", error || status?.registrationError ? "providerAttention" : busy ? "loginProgress" : !status ? "checking" : status?.accounts?.length ? "providerConfigured" : "notLoggedIn"), presentation === "group" ? providerIdentity(h, t, name, status?.accounts ?? [], usage, status?.clientVersion) : h("span", { style: styles$3.name }, name), presentation === "auth" ? null : button(t("accountsManage"), () => setManager(true), false, { style: { marginInlineStart: "auto" } }), presentation === "group" ? providerDisclosure(h, t, name, expanded, () => setExpanded(!expanded)) : status?.clientVersion ? h("span", {
+		}) : null, status?.cliSettings && expanded ? h("div", { style: styles$3.statusLine }, ...["cliMaxConcurrent"].map((key) => h("label", { key }, t(key), h(Input, {
+			type: "number",
+			min: 1,
+			max: 1440,
+			value: status.cliSettings[key],
+			"aria-label": t(key),
+			disabled: pending,
+			onChange: (event) => {
+				const value = Number(event.target.value);
+				if (!Number.isSafeInteger(value) || value < 1 || value > 1440) return;
+				action(async () => {
+					await call("setProviderSettings", {
+						original: { [key]: status.cliSettings[key] },
+						settings: { [key]: value }
+					});
+					await refreshStatus();
+				});
+			}
+		})))) : null, part("card", styles$3.card, presentation !== "auth" && part("header", styles$3.cardHeader, providerStatus(h, t, error || status?.registrationError ? "error" : busy ? "warning" : !status ? "checking" : status?.accounts?.length ? "ready" : "warning", error || status?.registrationError ? "providerAttention" : busy ? "loginProgress" : !status ? "checking" : status?.accounts?.length ? "providerConfigured" : "notLoggedIn"), presentation === "group" ? providerIdentity(h, t, name, status?.accounts ?? [], usage, status?.clientVersion) : h("span", { style: styles$3.name }, name), presentation === "auth" ? null : button(t("accountsManage"), () => setManager(true), false, { style: { marginInlineStart: "auto" } }), presentation === "group" ? providerDisclosure(h, t, name, expanded, () => setExpanded(!expanded)) : status?.clientVersion ? h("span", {
 			style: styles$3.clientVersion,
 			title: t("clientVersionHint")
 		}, "CLI ", h("bdi", { dir: "ltr" }, status.clientVersion.version), " · ", t(`source_${status.clientVersion.source}`)) : null), (presentation === "auth" || presentation === "group" && status?.accounts?.length) && !busy && !status?.registrationError ? null : h("p", {
@@ -11210,7 +11232,7 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 					await call("setDefault", { account: account.key });
 					await refreshStatus();
 				});
-			}, account.accessMethod === "official-cli", {
+			}, false, {
 				style: styles$3.starButton,
 				title: t(account.isDefault ? "defaultAccount" : "makeDefault"),
 				"aria-label": t(account.isDefault ? "defaultAccount" : "makeDefault")
@@ -11223,7 +11245,10 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 			}, t(account.accessMethod === "official-cli" ? "officialCli" : "directSignIn")), account.accessMethod === "official-cli" ? h("p", { style: {
 				...styles$3.statusLine,
 				overflowWrap: "anywhere"
-			} }, h("bdi", null, account.cliPath), " ", h("bdi", null, account.cliVersion)) : null, ...(status?.capabilities?.accessMethods ?? []).filter((method) => method.id === (account.accessMethod ?? "direct")).map((method) => warning(method, "span", "data-waycraft-account-warning")), account.plan ? h("bdi", { style: styles$3.usagePlan }, account.plan) : null, account.expiresAt ? h("span", { style: styles$3.statusLine }, t("expires"), " ", h("bdi", null, date(account.expiresAt))) : null, button(t("logout"), () => setConfirmation({
+			} }, h("bdi", null, account.cliPath), " ", h("bdi", null, account.cliVersion)) : null, account.accessMethod === "official-cli" ? h("span", {
+				style: styles$3.statusLine,
+				"data-waycraft-account-api-keys-removed": "true"
+			}, t("cliApiKeysRemoved")) : null, ...(status?.capabilities?.accessMethods ?? []).filter((method) => method.id === (account.accessMethod ?? "direct")).map((method) => warning(method, "span", "data-waycraft-account-warning")), account.plan ? h("bdi", { style: styles$3.usagePlan }, account.plan) : null, account.expiresAt ? h("span", { style: styles$3.statusLine }, t("expires"), " ", h("bdi", null, date(account.expiresAt))) : null, button(t("logout"), () => setConfirmation({
 				account: account.key,
 				label: account.account
 			}), account.accessMethod === "official-cli", {

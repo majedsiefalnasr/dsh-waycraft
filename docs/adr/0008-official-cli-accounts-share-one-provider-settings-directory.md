@@ -4,13 +4,25 @@ A CLI keeps its login, settings, skills, hooks and session history in one config
 
 Provider settings start empty, because Waycraft's managers are the source (ADR-0006). Bringing in the CLI's native configuration is an import the Owner reviews, a copy rather than a link.
 
-## Initial linkage gate
+## Initial linkage policy
 
-Ticket #180 creates the account directory and empty Provider settings directory only, without links. Before the first CLI session, #182 must establish and implement the initial linkage policy; #187 covers the second account, repair and deletion.
+Ticket #180 creates the account directory and empty Provider settings directory. Before the first CLI run, Waycraft creates and links only this explicit shared-name allowlist from the provider settings directory into each account directory:
 
-At the start of #182, after separately authorized real sign-in, present names only of the entries created in the Waycraft-owned account directory and a proposed account-private/shared classification. The Owner approves that inventory before linkage code. Examine `.claude.json` first: if it mixes account identity with general settings, keep it account-private and obtain a decision on the shared portion. No approved inventory exists yet; add it here only after observation and approval.
+- `settings.json`
+- `CLAUDE.md`
+- `skills/`
+- `commands/`
+- `agents/`
+- `rules/`
+- `hooks/`
+- `plugins/`
+- `projects/`
 
-The policy direction is an explicit account-private allowlist, with the remaining approved inventory shared. Unknown new names stay in the account directory and produce a warning, never an automatic link. The default Claude directory remains excluded from observation, copying and linking.
+Every other name created by the CLI remains account-private by default, without a warning and without automatic linking. In particular, `.claude.json` and login files remain account-private because they are not on the allowlist. Provider settings start empty; Waycraft creates the allowlisted entries there before linking them. No real account inventory is needed to implement this policy. At live acceptance (#195), the Owner reviews what the CLI actually created; any additional name approved for sharing is added to the allowlist in a later ticket.
+
+Before every run, verify each allowlisted account entry is still the expected link. If the CLI replaced a shared link with a real file or directory, copy/reconcile its contents into Provider settings, then restore the link. Tests use fixtures and never inspect the default Claude directory (`~/.claude`) or its Keychain entry.
+
+The initial names are based on Claude Code's documented settings, instructions, skills, commands, agents, rules, hooks, plugins and session transcript storage locations: [settings reference](https://code.claude.com/docs/en/settings-reference), [memory](https://code.claude.com/docs/en/memory), [plugins](https://code.claude.com/docs/en/plugins/manifest-reference), and [SDK features](https://code.claude.com/docs/en/agent-sdk/claude-code-features).
 
 ## Considered Options
 - Adopt the CLI's existing login as the first account: no second sign-in, but Waycraft would write into a directory the terminal also uses, and the first account would differ in kind from the rest.

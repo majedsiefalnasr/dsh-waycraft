@@ -1,12 +1,15 @@
-import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile, rename, rm, lstat, readdir, symlink, copyFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { randomUUID, createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths';
 
-interface CliProcess {
+export interface CliProcess {
+  stdout?: Readable;
   done: Promise<{ exitCode: number | null; signal: string | null }>;
   collected: {
     stdout?: { readFrom(offset: number): { text: string; lossy: boolean } };
+    stderr?: { readFrom(offset: number): { text: string; lossy: boolean } };
   };
   terminate(): Promise<unknown>;
   waitForExit(): Promise<unknown>;
@@ -33,8 +36,8 @@ export interface ClaudeCliRuntime {
     cwd: string;
     env: Record<string, string | undefined>;
     stdio: {
-      stdin: 'ignore';
-      stdout: { maxBytes: number };
+      stdin: 'ignore' | { text: string };
+      stdout: 'pipe' | { maxBytes: number };
       stderr: { maxBytes: number };
     };
     graceMs: number;
@@ -43,11 +46,117 @@ export interface ClaudeCliRuntime {
 }
 
 /** Waycraft-owned storage for the Claude Official CLI: account directories, Provider settings and metadata. */
-const claudeStorage = (...parts: string[]) =>
+export const claudeStorage = (...parts: string[]) =>
   dshHomePath('plugins', 'waycraft', 'subscriptions', 'claude', ...parts);
 const accountsFile = () => claudeStorage('accounts.json');
+const SHARED_CLAUDE_PATHS = ['settings.json', 'CLAUDE.md', 'skills', 'commands', 'agents', 'rules', 'hooks', 'plugins', 'projects'] as const;
+
+async function mergeSharedDirectory(source: string, target: string, baseline: Record<string, string> = {}, prefix = ""): Promise<void> {
+  await mkdir(source, { recursive: true, mode: 0o700 });
+  if (!(await lstat(source)).isDirectory()) throw new Error('Refusing non-directory Claude shared path');
+  for (const entry of await readdir(target, { withFileTypes: true })) {
+    if (!entry.isDirectory() && !entry.isFile()) throw new Error(`Refusing unsupported Claude shared-path entry: ${entry.name}`);
+    const sourceEntry = join(source, entry.name);
+    const targetEntry = join(target, entry.name);
+    let sourceInfo;
+    try { sourceInfo = await lstat(sourceEntry); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (entry.isDirectory()) await mergeSharedDirectory(sourceEntry, targetEntry, baseline, `${prefix}${entry.name}/`);
+      else if (entry.isFile()) await copyFile(targetEntry, sourceEntry);
+      continue;
+    }
+    if (entry.isDirectory() && sourceInfo.isDirectory()) await mergeSharedDirectory(sourceEntry, targetEntry, baseline, `${prefix}${entry.name}/`);
+    else if (entry.isFile() && sourceInfo.isFile()) {
+      const bytes = await readFile(sourceEntry);
+      if (!bytes.equals(await readFile(targetEntry))) {
+        if (createHash('sha256').update(bytes).digest('hex') !== baseline[`${prefix}${entry.name}/`]) throw new Error(`Conflicting Claude shared-path entry: ${entry.name}`);
+        await copyFile(targetEntry, sourceEntry);
+      }
+    } else throw new Error(`Conflicting Claude shared-path entry: ${entry.name}`);
+  }
+}
+
+async function sharedBaseline(path: string, prefix = ''): Promise<Record<string, string>> {
+  const info = await lstat(path);
+  if (info.isFile()) return { [prefix]: createHash('sha256').update(await readFile(path)).digest('hex') };
+  if (!info.isDirectory()) throw new Error('Refusing unsupported Claude shared source');
+  const result: Record<string, string> = {};
+  for (const entry of await readdir(path)) Object.assign(result, await sharedBaseline(join(path, entry), `${prefix}${entry}/`));
+  return result;
+}
+/** Ensure Provider-owned allowlisted files are linked into the account before each CLI run. */
+const preparationLocks = new Map<string, Promise<unknown>>();
+export async function prepareClaudeCliAccountDirectory(loginId: string): Promise<string> {
+  const key = claudeStorage('settings');
+  const previous = preparationLocks.get(key) ?? Promise.resolve();
+  const operation = previous.catch(() => {}).then(() => reconcileClaudeCliAccountDirectory(loginId));
+  preparationLocks.set(key, operation);
+  try { return await operation; }
+  finally { if (preparationLocks.get(key) === operation) preparationLocks.delete(key); }
+}
+async function reconcileClaudeCliAccountDirectory(loginId: string): Promise<string> {
+  const directory = claudeStorage('accounts', loginId);
+  const shared = claudeStorage('settings');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await mkdir(shared, { recursive: true, mode: 0o700 });
+  for (const name of SHARED_CLAUDE_PATHS) {
+    const source = join(shared, name);
+    const target = join(directory, name);
+    const baselinePath = join(directory, `.waycraft-shared-${name}.baseline.json`);
+    const refreshBaseline = async () => writeFile(baselinePath, JSON.stringify(await sharedBaseline(source)), { mode: 0o600 });
+    try {
+      if ((await lstat(source)).isSymbolicLink()) throw new Error(`Refusing symlinked Claude shared source: ${name}`);
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    let targetInfo;
+    try { targetInfo = await lstat(target); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (name === 'settings.json' || name === 'CLAUDE.md') await writeFile(source, '', { flag: 'a', mode: 0o600 });
+      else await mkdir(source, { recursive: true, mode: 0o700 });
+      await symlink(source, target);
+      await refreshBaseline();
+      continue;
+    }
+    if (targetInfo.isSymbolicLink()) {
+      const link = await import('node:fs/promises').then((fs) => fs.readlink(target));
+      if (link !== source) throw new Error(`Refusing to replace unexpected Claude shared-path symlink: ${name}`);
+      await refreshBaseline();
+      continue;
+    }
+    const snapshot = join(directory, `.waycraft-reconciled-${name}-${randomUUID()}`);
+    await rename(target, snapshot);
+    try {
+    let baseline: Record<string, string> = {};
+    try { baseline = JSON.parse(await readFile(baselinePath, 'utf8')); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    if (targetInfo.isDirectory()) await mergeSharedDirectory(source, snapshot, baseline);
+    else if (targetInfo.isFile()) {
+      try {
+        const existing = await lstat(source);
+        const sharedBytes = await readFile(source);
+        if (!existing.isFile() || (!sharedBytes.equals(await readFile(snapshot)) && createHash('sha256').update(sharedBytes).digest('hex') !== baseline['']))
+          throw new Error(`Conflicting Claude shared-path entry: ${name}`);
+        await copyFile(snapshot, source);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        await copyFile(snapshot, source);
+      }
+    }
+    else throw new Error(`Unsupported Claude shared-path entry: ${name}`);
+    // Retain the replaced inode tree: a running CLI may still hold open handles.
+    // Never recursively delete a live account path during reconciliation.
+    await symlink(source, target);
+    await refreshBaseline();
+    } catch (error) {
+      // Restore only when no concurrent writer recreated the live path; retain snapshot regardless.
+      try { await lstat(target); } catch (missing) { if ((missing as NodeJS.ErrnoException).code === 'ENOENT') await rename(snapshot, target); }
+      throw error;
+    }
+  }
+  return directory;
+}
 /** Credential- and endpoint-selecting variables removed from every CLI child run for an account. */
-const SCRUBBED_ENV = {
+export const SCRUBBED_ENV = {
   ANTHROPIC_API_KEY: undefined,
   ANTHROPIC_AUTH_TOKEN: undefined,
   CLAUDE_CODE_OAUTH_TOKEN: undefined,
@@ -305,7 +414,7 @@ export class ClaudeCliLogin {
 }
 
 /** Probes only a Waycraft-owned configuration directory, never the CLI default. */
-export async function discoverClaudeCli(runtime: ClaudeCliRuntime) {
+export async function discoverClaudeCli(runtime: ClaudeCliRuntime, callerSignal?: AbortSignal) {
   let path: string;
   try {
     path = await runtime.resolveExecutable('claude');
@@ -320,7 +429,7 @@ export async function discoverClaudeCli(runtime: ClaudeCliRuntime) {
   }
   const directory = claudeStorage('probe');
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const signal = AbortSignal.timeout(10_000);
+  const signal = callerSignal ? AbortSignal.any([callerSignal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000);
   const handle = runtime.spawn({
     argv: [path, '--version'],
     cwd: directory,
@@ -346,6 +455,9 @@ export async function discoverClaudeCli(runtime: ClaudeCliRuntime) {
     const version = output?.text.match(/^(\d+\.\d+\.\d+)(?:\s|$)/)?.[1];
     if (!version)
       throw new Error('Claude CLI returned an unsupported version response');
+    // Official Agent SDK subprocess transport declares MINIMUM_CLAUDE_CODE_VERSION = '2.0.0'.
+    if (Number(version.split('.')[0]) < 2)
+      throw new Error('Claude CLI 2.0.0 or newer is required; update Claude Code and retry');
     return { available: true, path, version };
   } finally {
     await handle.terminate();
