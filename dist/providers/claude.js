@@ -4,6 +4,10 @@
  * the Anthropic Messages API with the Claude Code identity headers.
  */
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
+import { discoverClaudeCli, prepareClaudeCliAccountDirectory, SCRUBBED_ENV } from '../auth/claude-cli.js';
+import { translateClaudeCliStream } from '../translate/claude-cli.js';
 import { EMPTY_RESPONSE_CODE, errorChain, LlmAdapter, LlmError, ReasoningEffortId, } from '@deepseek-ai/dsh-llm';
 import { hostSupportsImageOffload, IMAGE_OFFLOAD_REQUIRED, requiredImageOffloadCount, resolveImages, } from '../translate/resolved.js';
 import { markMessageCache, streamAnthropic, toAnthropicMessages, toAnthropicSystem, toAnthropicTools, } from '../translate/anthropic.js';
@@ -515,6 +519,20 @@ export function claudeRequestBody(options, messages, maxTokens, thinking, effort
 /** Claude wire adapter: one instance serves the `claude` provider route. */
 export class ClaudeAdapter extends LlmAdapter {
     options;
+    cliOperations = new Set();
+    cliAdmission = new Map();
+    cliWaiters = new Set();
+    cliQueueAbort = new AbortController();
+    cliTurns = new Set();
+    disposed = false;
+    async disposeCliTurns() {
+        this.disposed = true;
+        this.cliQueueAbort.abort();
+        for (const turn of this.cliTurns)
+            turn.controller.abort();
+        await Promise.allSettled([...this.cliTurns].map((turn) => turn.closed));
+        await Promise.allSettled([...this.cliOperations]);
+    }
     catalog;
     /** In-memory catalogs for non-default accounts (the persisted cache is the default's). */
     accountCatalogs = new Map();
@@ -620,6 +638,10 @@ export class ClaudeAdapter extends LlmAdapter {
                 ...(signal === undefined ? {} : { signal }),
             });
         }
+        if (account.startsWith('official-cli:'))
+            return this.staticModels(provider);
+        if (account.startsWith('direct:'))
+            account = decodeURIComponent(account.slice('direct:'.length));
         if (!(await this.options.tokens.hasSession(account))) {
             return [];
         }
@@ -680,9 +702,135 @@ export class ClaudeAdapter extends LlmAdapter {
         }
         yield* this.streamCore(options);
     }
-    /** Pool seam: stream through one specific account instead of the default. */
+    /** Pool seam: account keys are internal and namespaced by access method. */
     streamAccount(options, account) {
-        return this.streamCore(options, account);
+        if (account.startsWith('official-cli:'))
+            return this.streamCliAccount(options, decodeURIComponent(account.slice('official-cli:'.length)));
+        return this.streamCore(options, account.startsWith('direct:') ? decodeURIComponent(account.slice('direct:'.length)) : account);
+    }
+    async *streamCliAccount(options, loginId) {
+        const queueSignal = options.signal ? AbortSignal.any([options.signal, this.cliQueueAbort.signal]) : this.cliQueueAbort.signal;
+        const cap = this.options.cliSettings?.().cliMaxConcurrent ?? this.options.cliMaxConcurrent ?? 4;
+        while ((this.cliAdmission.get(loginId) ?? 0) >= cap) {
+            queueSignal.throwIfAborted();
+            await new Promise((resolve, reject) => {
+                const wake = () => { cleanup(); resolve(); };
+                const abort = () => { cleanup(); reject(queueSignal.reason); };
+                const cleanup = () => { this.cliWaiters.delete(wake); queueSignal.removeEventListener('abort', abort); };
+                this.cliWaiters.add(wake);
+                queueSignal.addEventListener('abort', abort, { once: true });
+            });
+        }
+        queueSignal.throwIfAborted();
+        this.cliAdmission.set(loginId, (this.cliAdmission.get(loginId) ?? 0) + 1);
+        let complete;
+        const operation = new Promise((resolve) => { complete = resolve; });
+        this.cliOperations.add(operation);
+        try {
+            yield* this.runCliAccount(options, loginId);
+        }
+        finally {
+            complete();
+            this.cliOperations.delete(operation);
+            this.cliAdmission.set(loginId, (this.cliAdmission.get(loginId) ?? 1) - 1);
+            for (const wake of [...this.cliWaiters])
+                wake();
+        }
+    }
+    async *runCliAccount(options, loginId, fresh = false) {
+        const runtime = this.options.cliRuntime?.();
+        if (!runtime)
+            throw new Error('Official CLI requires the DSH subprocess service');
+        const discovery = await discoverClaudeCli(runtime, options.signal ? AbortSignal.any([options.signal, this.cliQueueAbort.signal]) : this.cliQueueAbort.signal);
+        if (!discovery.available || !discovery.path)
+            throw new Error('Claude CLI is not available');
+        const directory = await prepareClaudeCliAccountDirectory(loginId);
+        let prior = options.messages.flatMap((message) => {
+            const state = message.role === 'assistant' ? message.source?.replayState : undefined;
+            return state && typeof state === 'object' && 'response' in state && state.response && typeof state.response === 'object' && state.response.kind === 'waycraft-claude-cli-session'
+                ? [state.response.sessionId]
+                : [];
+        }).filter((value) => typeof value === 'string').at(-1);
+        if (fresh)
+            prior = undefined;
+        const prompt = options.messages.filter((message) => message.role === 'user').at(-1);
+        if (!prompt)
+            throw new Error('Claude CLI turn requires a user message');
+        const messageText = (message) => typeof message.content === 'string' ? message.content : message.content.map((part) => part.type === 'text' ? part.text : '').join('');
+        // A new CLI session has no transcript. Preserve DSH's text history as a
+        // single contextual prompt; a resumed session already owns that history.
+        const text = prior || options.messages.length === 1 ? messageText(prompt) : options.messages.map((message) => `[${message.role}]\n${messageText(message)}`).join('\n\n');
+        const argv = [discovery.path, ...(options.system ? ['--system-prompt', options.system] : []), '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--model', options.model, ...(prior ? ['--resume', prior] : ['--session-id', randomUUID()])];
+        if (this.disposed)
+            throw new Error('Claude adapter is disposed');
+        const controller = new AbortController();
+        const caller = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+        const watchdog = idleWatchdog(caller, this.options.streamIdleTimeoutMs);
+        const signal = watchdog.signal;
+        signal.throwIfAborted();
+        const handle = runtime.spawn({ argv, cwd: directory, env: { CLAUDE_CONFIG_DIR: directory, ...SCRUBBED_ENV }, stdio: { stdin: { text: JSON.stringify({ type: 'user', session_id: '', parent_tool_use_id: null, message: { role: 'user', content: text } }) + '\n' }, stdout: 'pipe', stderr: { maxBytes: 64 * 1024 } }, graceMs: 1000, signal });
+        const turn = { controller, closed: handle.waitForExit() };
+        this.cliTurns.add(turn);
+        // Observe spawn failures immediately, including while the output iterator is pending.
+        void handle.done.catch(() => { });
+        let retryMissing = false;
+        let outputEvidence = "";
+        try {
+            if (!handle.stdout)
+                throw new Error('Claude CLI subprocess omitted stdout pipe');
+            const stdout = handle.stdout;
+            async function* observedLines() {
+                const decoder = new StringDecoder('utf8');
+                let pending = '';
+                for await (const chunk of stdout) {
+                    watchdog.pulse();
+                    pending += decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                    let newline;
+                    while ((newline = pending.indexOf('\n')) !== -1) {
+                        const line = pending.slice(0, newline);
+                        pending = pending.slice(newline + 1);
+                        if (Buffer.byteLength(line, 'utf8') > 1024 * 1024)
+                            throw new Error('Claude CLI output frame exceeds 1 MiB');
+                        // Only the CLI's own error result is rejection evidence; assistant text never is.
+                        try {
+                            const frame = JSON.parse(line);
+                            if (frame.type === 'result' && frame.is_error === true && typeof frame.result === 'string')
+                                outputEvidence += frame.result + '\n';
+                        }
+                        catch { /* not a JSON frame */ }
+                        yield line;
+                    }
+                    if (Buffer.byteLength(pending, 'utf8') > 1024 * 1024)
+                        throw new Error('Claude CLI output frame exceeds 1 MiB');
+                }
+                pending += decoder.end();
+                if (pending)
+                    yield pending;
+            }
+            yield* translateClaudeCliStream(observedLines(), this.options.onWarn);
+            const outcome = await handle.done;
+            if (outcome.exitCode !== 0 || outcome.signal)
+                throw new Error('Claude CLI turn failed');
+        }
+        catch (error) {
+            const stderr = handle.collected?.stderr?.readFrom(0)?.text ?? '';
+            if (prior && !fresh && !signal.aborted && /(?:no (?:conversation|session) found|(?:session|conversation).*(?:not found|does not exist|missing))/i.test(`${outputEvidence} ${stderr}`))
+                retryMissing = true;
+            else
+                throw mapFetchFailure('Claude CLI', error, watchdog, options.signal);
+        }
+        finally {
+            watchdog.stop();
+            try {
+                await handle.terminate();
+                await turn.closed;
+            }
+            finally {
+                this.cliTurns.delete(turn);
+            }
+        }
+        if (retryMissing)
+            yield* this.runCliAccount(options, loginId, true);
     }
     async *streamCore(options, account) {
         const watchdog = idleWatchdog(options.signal, this.options.streamIdleTimeoutMs);

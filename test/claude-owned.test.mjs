@@ -272,7 +272,9 @@ test('Official CLI verifies successful login through scoped auth status and retu
     const accounts = (await h.call('status')).value.providers.claude.accounts;
     assert.equal(accounts.length, 1);
     assert.equal(accounts[0].accessMethod, 'official-cli');
-    assert.equal(accounts[0].key, login.loginId);
+    assert.equal(accounts[0].key, `official-cli:${login.loginId}`);
+    await h.call('setDefault', { provider: 'claude', account: accounts[0].key });
+    assert.equal((await h.call('status')).value.providers.claude.accounts[0].isDefault, true);
     assert.equal(accounts[0].emailAddress, 'cli@example.com');
     await h.call('cliCancel', { provider: 'claude', loginId: login.loginId });
     const next = (
@@ -642,7 +644,7 @@ test('A corrupt or partly invalid Official CLI account file degrades without bre
     assert.equal(status.ok, true);
     assert.deepEqual(
       status.value.providers.claude.accounts.map((account) => account.key),
-      [valid],
+      [`official-cli:${valid}`],
     );
   } finally {
     await h.dispose();

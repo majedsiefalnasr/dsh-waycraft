@@ -70,9 +70,9 @@ The work lands in two phases: the framework with Claude and Antigravity first; C
 33. As the Owner, I want a session resumed with its history when I come back to it, so that I continue where I stopped.
 34. As the Owner, I want session titles and summaries produced through the same account, so that side requests need no other provider.
 35. As the Owner, I want each subagent and task card on a CLI account to run its own CLI process, so that parallel work does not collide.
-36. As the Owner, I want an idle CLI process stopped after a while and brought back on my next message, so that idle sessions do not hold resources.
+36. As the Owner, I want each message to run in a fresh CLI process that exits when the turn ends and resumes the session on my next message, so that no process lingers between turns.
 37. As the Owner, I want a cap on simultaneous CLI processes per account, so that one account is not flooded.
-38. As the Owner, I want to change the idle time and the cap, so that I can fit them to my machine.
+38. As the Owner, I want to change the per-account cap, so that I can fit it to my machine.
 
 ### Skills, MCP servers and hooks
 
@@ -127,7 +127,7 @@ Recorded decisions: ADR-0005 (a subscription account carries its access method),
 
 ### Model
 
-- A Subscription account gains an Access method. Existing accounts are Direct sign-in; no automatic migration.
+- A Subscription account gains an Access method. Existing accounts are Direct sign-in; no automatic migration. Inside Subscriptions, account routing uses a discriminated Direct-sign-in/Official-CLI union. It is an in-memory view over each method's existing storage owner; Official CLI entries carry no token fields. Public DSH APIs and provider ids do not change. Keys are access-method-namespaced so the same provider identity can exist under both methods without collision. Official CLI entries are excluded from automatic Account-pool switching in this phase; the Default account may select either method, and the model picker deduplicates model ids.
 - Provider ids are unchanged and each model appears once. The Default account selects the account, and so the method, for a new session. A session is bound to its account until a switch.
 - A provider gains a Switch policy (Manual, Ask, Automatic) and, for Official CLI, Provider settings.
 
@@ -143,9 +143,9 @@ Recorded decisions: ADR-0005 (a subscription account carries its access method),
 - The driver runs the CLI as published. It never modifies or installs the binary, and never reads, stores or forwards its login, except under Account insights.
 - Before a run the driver checks the CLI version against the provider's minimum and learns which optional flags the installed CLI accepts; an unsupported optional flag is dropped, an unsupported required one is reported.
 - Provider API-key variables are removed from the child environment.
-- One process per session, stopped after an idle period (default 10 minutes) and restored by resuming the session. A per-account cap on concurrent processes (default 4). Both are settings.
+- One `claude -p` process per turn, with stream-JSON input/output. The first turn starts the session with `--session-id`; every later turn resumes it with `--resume <session_id>`, using the CLI session id and account kept in the message's replay state. DSH's conversation history is re-injected only when the CLI rejects the resume because the session is missing, or when the session switches account or provider. The process stays alive until its turn ends (approvals and cancellation work inside the turn), then exits; nothing is kept between turns and there is no idle timer. A per-account cap on concurrent CLI processes (default 4) limits simultaneous turns and is a setting.
 - Side requests (titles, summaries) run as tool-less single-turn runs. Each subagent or task card gets its own process.
-- A turn does not survive a DSH restart; the session resumes afterwards.
+- A turn does not survive a DSH restart; the next session turn resumes the CLI transcript when its session id is still available, otherwise it starts a new CLI transcript from DSH's conversation history.
 - dsh-oh-my-claude (MIT) is a reference for approach only, never a runtime companion. Anything adapted from it gets a provenance record and a third-party notice entry.
 
 ### Accounts and Provider settings
@@ -193,7 +193,7 @@ A good test here drives the feature from outside and asserts what the Owner or D
 
 Two existing seams, no new code seam:
 
-1. **The assembled Subscriptions component (host).** Tests start the whole component with a fake host context and drive it through its RPC routes and its registered adapters' stream, as the existing per-provider component tests do. Where those tests replace the network with a fake, these replace the provider's CLI with a **fake executable** that reads its arguments, environment and input, replays a recorded stream and records what it received. Covered here: adding an account by each method and its warnings; the arguments of a run (only enabled MCP servers, skill visibility, stripped key variables); stream translation and approvals; the three Switch policies and context across a switch; usage events and the extra-usage notice; account and Provider settings directories, links and their repair; version and flag checks; idle stop and resume; the concurrency cap; the recognised 400 on Direct sign-in.
+1. **The assembled Subscriptions component (host).** Tests start the whole component with a fake host context and drive it through its RPC routes and its registered adapters' stream, as the existing per-provider component tests do. Where those tests replace the network with a fake, these replace the provider's CLI with a **fake executable** that reads its arguments, environment and input, replays a recorded stream and records what it received. Covered here: adding an account by each method and its warnings; the arguments of a run (only enabled MCP servers, skill visibility, stripped key variables); stream translation and approvals; the three Switch policies and context across a switch; usage events and the extra-usage notice; account and Provider settings directories, links and their repair; version and flag checks; per-turn resume and missing-session fallback; the concurrency cap; no orphaned process after a turn, an abort or disposal; the recognised 400 on Direct sign-in.
 2. **The manage UI (client).** Tests render the real components with a fake RPC in English and Arabic, as the existing manage tests and UI matrix do. Covered here: the selector and warnings; the capability-driven manage page; the Switch policy setting and the Automatic confirmation; the Account insights switch; the Context nudge card; the offer to continue on another account.
 
 Everything runs in temporary directories. No test touches the real CLI directories, the Keychain, a real CLI or a provider. Locale completeness stays enforced by the existing guard.

@@ -358,6 +358,13 @@ export function createClaudeCard(
             },
           })
         : null,
+      status?.cliSettings && expanded ? h('div', { style: styles.statusLine },
+        ...(['cliMaxConcurrent'] as const).map((key) => h('label', { key }, t(key), h(Input, {
+          type: 'number', min: 1, max: 1440, value: status.cliSettings[key],
+          'aria-label': t(key), disabled: pending,
+          onChange: (event: any) => { const value = Number(event.target.value); if (!Number.isSafeInteger(value) || value < 1 || value > 1440) return; void action(async () => { await call('setProviderSettings', { original: { [key]: status.cliSettings[key] }, settings: { [key]: value } }); await refreshStatus(); }); },
+        }))),
+      ) : null,
       part(
         'card',
         styles.card,
@@ -468,7 +475,7 @@ export function createClaudeCard(
                       await refreshStatus();
                     });
                 },
-                account.accessMethod === 'official-cli',
+                false,
                 {
                   style: styles.starButton,
                   title: t(
@@ -506,6 +513,16 @@ export function createClaudeCard(
                     h('bdi', null, account.cliPath),
                     ' ',
                     h('bdi', null, account.cliVersion),
+                  )
+                : null,
+              account.accessMethod === 'official-cli'
+                ? h(
+                    'span',
+                    {
+                      style: styles.statusLine,
+                      'data-waycraft-account-api-keys-removed': 'true',
+                    },
+                    t('cliApiKeysRemoved'),
                   )
                 : null,
               ...(status?.capabilities?.accessMethods ?? [])

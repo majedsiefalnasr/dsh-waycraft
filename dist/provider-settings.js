@@ -110,6 +110,21 @@ export function validatePreferences(provider, input) {
             result.contextWindows[model] = value;
         }
     }
+    for (const key of ['cliMaxConcurrent']) {
+        const value = raw[key];
+        if (value === undefined)
+            continue;
+        if (provider !== 'claude' || typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > 1440)
+            throw new Error(`${key} must be a positive integer no greater than 1440 for Claude`);
+        result[key] = value;
+    }
+    if (raw.defaultAccount !== undefined) {
+        if (provider !== 'claude')
+            throw new Error('defaultAccount is currently supported only for Claude');
+        if (typeof raw.defaultAccount !== 'string' || !raw.defaultAccount.trim())
+            throw new Error('defaultAccount must be a non-empty account key');
+        result.defaultAccount = raw.defaultAccount;
+    }
     if (raw.promptCacheTtl !== undefined) {
         if (provider !== 'claude')
             throw new Error('promptCacheTtl is currently supported only for Claude');

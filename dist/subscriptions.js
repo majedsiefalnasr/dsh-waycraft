@@ -30,6 +30,7 @@ import { ImageAccountPool } from './providers/image-pool.js';
 import { CodexWebSearchProvider } from './providers/codex-search.js';
 import { createImageGenerateTool } from './tools/image-generate.js';
 import { registerWithAlias } from './tools/registration.js';
+import { subscriptionAccountKey } from './providers/account-kind.js';
 import { AccountPreferencesAdapter, accountAllowsPool, accountModelId, parseAccountModelId, } from './providers/account-preferences.js';
 import { CLAUDE_CAPABILITIES } from './provider-capabilities.js';
 import { ClaudeCliLogin, discoverClaudeCli, } from './auth/claude-cli.js';
@@ -595,6 +596,8 @@ export function apply(ctx, config = {}, options = {}) {
             extraUsageSessions.delete(sessionId);
         },
         tokens: claudeTokens,
+        cliRuntime,
+        cliSettings: () => preferences.get('claude'),
         models: claudeModels,
         streamIdleTimeoutMs: 300_000,
         discovery: !config.models?.claude?.length,
@@ -692,10 +695,19 @@ export function apply(ctx, config = {}, options = {}) {
         provider: 'claude',
         adapter: claudeAdapter,
         settings: preferences,
-        accounts: async () => (await claudeTokens.list()).map(({ key, session }) => ({
-            key,
-            label: session.emailAddress ?? key,
-        })),
+        accounts: async () => {
+            const direct = (await claudeTokens.list()).map(({ key, session }) => ({
+                accessMethod: 'direct', key: subscriptionAccountKey('direct', key), label: session.emailAddress ?? key, session,
+            }));
+            const cli = (await claudeCliLogin.accounts()).map((account) => ({
+                accessMethod: 'official-cli', key: subscriptionAccountKey('official-cli', account.key), label: account.emailAddress ?? account.key,
+            }));
+            const all = [...direct, ...cli];
+            const preferred = preferences.get('claude').defaultAccount;
+            const legacy = direct[0]?.key;
+            const first = preferred ?? legacy;
+            return [...all.filter((account) => account.key === first), ...all.filter((account) => account.key !== first)];
+        },
         pool: () => pool,
     });
     const presentedGrok = new AccountPreferencesAdapter({
@@ -853,6 +865,7 @@ export function apply(ctx, config = {}, options = {}) {
         claudeLifecycle.abort();
         auth.dispose();
         claudeAuth.dispose();
+        await claudeAdapter.disposeCliTurns();
         await claudeCliLogin.dispose();
         // Transport teardown is async; a failure must be logged, not become an unhandled rejection.
         return disposeProxyTransport().catch((error) => ctx.logger.warn(`dsh-waycraft: proxy transport disposal failed (${error?.code ?? error?.name ?? 'unknown'})`));
@@ -1230,15 +1243,19 @@ export function apply(ctx, config = {}, options = {}) {
                                                 claude: {
                                                     ...claudeState,
                                                     capabilities: CLAUDE_CAPABILITIES,
+                                                    cliSettings: { cliMaxConcurrent: preferences.get('claude').cliMaxConcurrent ?? 4 },
                                                     displayName: preferences.get('claude').displayName,
                                                     accounts: [
                                                         ...claudeState.accounts.map((account) => ({
                                                             ...account,
                                                             accessMethod: 'direct',
+                                                            isDefault: preferences.get('claude').defaultAccount ? preferences.get('claude').defaultAccount === subscriptionAccountKey('direct', account.key) : account.isDefault,
                                                             alias: ownAlias('claude', account.key),
                                                         })),
                                                         ...(await claudeCliLogin.accounts()).map((account) => ({
                                                             ...account,
+                                                            key: subscriptionAccountKey('official-cli', account.key),
+                                                            isDefault: preferences.get('claude').defaultAccount === subscriptionAccountKey('official-cli', account.key),
                                                             alias: ownAlias('claude', account.key),
                                                         })),
                                                     ],
@@ -1629,8 +1646,17 @@ export function apply(ctx, config = {}, options = {}) {
                                     await copilotAuth.setDefault(string('account'));
                                 else if (provider === 'grok')
                                     await grokAuth.setDefault(string('account'));
-                                else if (provider === 'claude')
-                                    await claudeAuth.setDefault(string('account'));
+                                else if (provider === 'claude') {
+                                    const requested = string('account');
+                                    const accounts = [
+                                        ...(await claudeTokens.list()).map(({ key }) => ({ accessMethod: 'direct', key: subscriptionAccountKey('direct', key) })),
+                                        ...(await claudeCliLogin.accounts()).map(({ key }) => ({ accessMethod: 'official-cli', key: subscriptionAccountKey('official-cli', key) })),
+                                    ];
+                                    const selected = accounts.find((account) => account.key === requested || (account.accessMethod === 'direct' && account.key === subscriptionAccountKey('direct', requested)));
+                                    if (!selected)
+                                        throw new Error('Claude account unavailable');
+                                    await preferences.set('claude', { ...preferences.get('claude'), defaultAccount: selected.key });
+                                }
                                 else
                                     await auth.setDefault(string('account'));
                                 break;

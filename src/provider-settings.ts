@@ -42,6 +42,9 @@ export interface ProviderPreferences {
   /** Codex only: per-model defaults for subagents, independent of main-session speed. */
   subagentSpeeds?: Record<string, SubagentSpeedTier>;
   tools?: Partial<Record<SubscriptionTool, boolean>>;
+  /** Claude only: the access-method-prefixed account key serving new sessions; absent follows the legacy OAuth default. */
+  defaultAccount?: string;
+  cliMaxConcurrent?: number;
   /** Claude only: overrides the plugin config's `claudePromptCacheTtl`; absent follows config. */
   promptCacheTtl?: PromptCacheTtlSetting;
 }
@@ -173,6 +176,20 @@ export function validatePreferences(
       }
       result.contextWindows[model] = value;
     }
+  }
+  for (const key of ['cliMaxConcurrent'] as const) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    if (provider !== 'claude' || typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > 1440)
+      throw new Error(`${key} must be a positive integer no greater than 1440 for Claude`);
+    result[key] = value;
+  }
+  if (raw.defaultAccount !== undefined) {
+    if (provider !== 'claude')
+      throw new Error('defaultAccount is currently supported only for Claude');
+    if (typeof raw.defaultAccount !== 'string' || !raw.defaultAccount.trim())
+      throw new Error('defaultAccount must be a non-empty account key');
+    result.defaultAccount = raw.defaultAccount;
   }
   if (raw.promptCacheTtl !== undefined) {
     if (provider !== 'claude')

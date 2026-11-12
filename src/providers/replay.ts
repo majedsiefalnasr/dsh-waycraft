@@ -77,6 +77,7 @@ export async function* streamAccountWithReplay(
           ...chunk.replayState,
           response: {
             kind: REPLAY_KIND,
+            account,
             version: 1,
             key,
             state: chunk.replayState.response,
