@@ -5,6 +5,15 @@ export const CLAUDE_CAPABILITIES = {
         updateCommand: 'claude update',
         source: 'https://code.claude.com/docs/en/setup',
     },
+    permissionModes: {
+        source: 'https://code.claude.com/docs/en/permission-modes',
+        byFilePolicy: {
+            'read-only': 'plan',
+            'workspace-write': 'acceptEdits',
+            'danger-full-access': 'bypassPermissions',
+        },
+        fallback: 'default',
+    },
     defaultAccessMethod: 'official-cli',
     accessMethods: [
         {

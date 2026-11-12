@@ -12,8 +12,29 @@ export interface ProviderCliRequirements {
   source: string;
 }
 
+/** The CLI modes DSH's file policy can select (the Claude CLI's `--permission-mode` values). */
+export type ProviderPermissionMode =
+  | 'default'
+  | 'plan'
+  | 'acceptEdits'
+  | 'bypassPermissions';
+
+/**
+ * How DSH's permission settings become the CLI's permission mode for a turn. The file policy reaches an adapter only as
+ * the line `Current DSH file policy: <policy>` in DSH's runtime-context message (a text convention, not an API), so a
+ * missing or unrecognised line selects `fallback`: the CLI's own asking mode, never a more permissive one.
+ * `bypassPermissions` for `danger-full-access` mirrors a mode the Owner chose in DSH.
+ */
+export interface ProviderPermissionModes {
+  source: string;
+  byFilePolicy: Readonly<Record<string, ProviderPermissionMode>>;
+  fallback: ProviderPermissionMode;
+}
+
 export interface ProviderCapabilities {
   cli: ProviderCliRequirements;
+  /** Permission mode mapping, and the fact that prompts, questions and plan reviews become DSH dialogs. */
+  permissionModes: ProviderPermissionModes;
   defaultAccessMethod: 'official-cli' | 'direct';
   accessMethods: ReadonlyArray<{
     id: 'official-cli' | 'direct';
@@ -27,6 +48,15 @@ export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
     minimumVersion: '2.0.0',
     updateCommand: 'claude update',
     source: 'https://code.claude.com/docs/en/setup',
+  },
+  permissionModes: {
+    source: 'https://code.claude.com/docs/en/permission-modes',
+    byFilePolicy: {
+      'read-only': 'plan',
+      'workspace-write': 'acceptEdits',
+      'danger-full-access': 'bypassPermissions',
+    },
+    fallback: 'default',
   },
   defaultAccessMethod: 'official-cli',
   accessMethods: [

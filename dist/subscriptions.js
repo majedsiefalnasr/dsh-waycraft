@@ -32,6 +32,7 @@ import { createImageGenerateTool } from './tools/image-generate.js';
 import { registerWithAlias } from './tools/registration.js';
 import { subscriptionAccountKey } from './providers/account-kind.js';
 import { AccountPreferencesAdapter, accountAllowsPool, accountModelId, parseAccountModelId, } from './providers/account-preferences.js';
+import { planReviewTextFor } from './auth/claude-cli-plan-text.js';
 import { CLAUDE_CAPABILITIES } from './provider-capabilities.js';
 import { ClaudeCliLogin, discoverClaudeCli, } from './auth/claude-cli.js';
 import { ClaudeAuthController, } from './auth/claude-controller.js';
@@ -620,6 +621,15 @@ export function apply(ctx, config = {}, options = {}) {
         },
         tokens: claudeTokens,
         cliRuntime,
+        // Optional services: a composition without one still runs turns, and the CLI is told nobody could be asked.
+        cliServices: (sessionId) => ({
+            approval: ctx.get('approval'),
+            userQuestions: ctx.get('userQuestions'),
+            agent: sessionId === undefined
+                ? undefined
+                : ctx.get('agents')?.get(sessionId),
+            planReviewText: planReviewTextFor(ctx.get('settings')),
+        }),
         cliSettings: () => preferences.get('claude'),
         models: claudeModels,
         streamIdleTimeoutMs: 300_000,

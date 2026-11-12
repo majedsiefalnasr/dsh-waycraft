@@ -21,7 +21,7 @@ test('registered Claude adapter streams once, resumes on its bound account, and 
   const executable = join(root, 'fake-claude.mjs');
   await writeFile(executable, `import {appendFileSync} from 'node:fs';
 const args=process.argv.slice(2); if(args.includes('--version')) { console.log('2.1.322'); } else if(args.includes('--help')) { console.log('Options:\\n  -p, --print\\n  --input-format <f>\\n  --output-format <f>\\n  --verbose\\n  --include-partial-messages\\n  --model <m>\\n  --session-id <id>\\n  --resume <id>\\n  --system-prompt <p>'); } else {
-let input=''; for await(const chunk of process.stdin) input+=chunk;
+let input=''; for await(const chunk of process.stdin){ input+=chunk; if(input.includes('\\n')) break; }
 appendFileSync(${JSON.stringify(join(root, 'record.jsonl'))},JSON.stringify({args,env:process.env,input})+'\\n');
 if(args.includes('--resume') && input.includes('missing-session')) { console.log(JSON.stringify({type:'result',is_error:true,result:'No conversation found with session ID: fixture'})); process.exit(1); }
 if(args.includes('--resume') && input.includes('stderr-missing')) { console.error('Error: session not found'); process.exit(1); }
@@ -45,11 +45,12 @@ if(input.includes('hold')) { setInterval(()=>{},1000); } else say({type:'result'
       children.add(child);
       let output = ''; if (spec.stdio.stdout !== 'pipe') child.stdout.on('data', chunk => output += chunk);
       let errors = ''; child.stderr.on('data', chunk => errors += chunk);
-      child.stdin.end(spec.stdio.stdin === 'ignore' ? undefined : spec.stdio.stdin.text);
+      // Follows the real subprocess service: 'pipe' stays open for the caller, { data } is written and ended.
+      const stdinMode = spec.stdio.stdin; if (stdinMode === 'ignore') child.stdin.end(); else if (typeof stdinMode === 'object') child.stdin.end(stdinMode.data);
       const done = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', (exitCode, signal) => { children.delete(child); resolve({ exitCode, signal }); }); });
       const stop = () => child.kill(); spec.signal.addEventListener('abort', stop, { once: true });
       void done.finally(() => spec.signal.removeEventListener('abort', stop));
-      return { stdout: child.stdout, done, collected: { stdout: { readFrom: () => ({ text: output, lossy: false }) }, stderr: { readFrom: () => ({ text: errors, lossy: false }) } }, terminate: async () => { if (children.has(child)) child.kill(); }, waitForExit: () => done };
+      return { stdin: stdinMode === 'pipe' ? child.stdin : undefined, stdout: child.stdout, done, collected: { stdout: { readFrom: () => ({ text: output, lossy: false }) }, stderr: { readFrom: () => ({ text: errors, lossy: false }) } }, terminate: async () => { if (children.has(child)) child.kill(); }, waitForExit: () => done };
     },
   };
   const adapters = {}, cleanups = [];

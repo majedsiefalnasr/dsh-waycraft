@@ -108,6 +108,9 @@ import {
   parseAccountModelId,
 } from './providers/account-preferences.js';
 import type { ClaudeSession, ProviderId } from './auth/store.js';
+import type { CliControlServices } from './auth/claude-cli-control.js';
+import { planReviewTextFor } from './auth/claude-cli-plan-text.js';
+import type { LocaleSettingsReader } from './auth/claude-cli-plan-text.js';
 import { CLAUDE_CAPABILITIES } from './provider-capabilities.js';
 import {
   ClaudeCliLogin,
@@ -879,6 +882,22 @@ export function apply(
     },
     tokens: claudeTokens,
     cliRuntime,
+    // Optional services: a composition without one still runs turns, and the CLI is told nobody could be asked.
+    cliServices: (sessionId) => ({
+      approval: ctx.get('approval') as unknown as CliControlServices['approval'],
+      userQuestions: ctx.get('userQuestions') as unknown as CliControlServices['userQuestions'],
+      agent:
+        sessionId === undefined
+          ? undefined
+          : (
+              ctx.get('agents') as unknown as
+                | { get(id: string): unknown }
+                | undefined
+            )?.get(sessionId),
+      planReviewText: planReviewTextFor(
+        ctx.get('settings') as unknown as LocaleSettingsReader | undefined,
+      ),
+    }),
     cliSettings: () => preferences.get('claude'),
     models: claudeModels,
     streamIdleTimeoutMs: 300_000,

@@ -57,7 +57,7 @@ const log=x=>appendFileSync(${JSON.stringify(record)},JSON.stringify(x)+'\\n');
 if(args.includes('--version')) { console.log(${JSON.stringify(version)}); }
 else if(args.includes('--help')) { log({kind:'help'}); process.stdout.write(${JSON.stringify(helpText)}); }
 else {
-let input=''; for await(const chunk of process.stdin) input+=chunk;
+let input=''; for await(const chunk of process.stdin){ input+=chunk; if(input.includes('\\n')) break; }
 log({kind:'turn',args,input});
 const refused=${JSON.stringify(refuse)}.filter(flag=>args.includes(flag));
 if(refused.length) { console.error("error: unknown option '"+refused[0]+"'"); process.exit(1); }
@@ -87,7 +87,8 @@ say({type:'result',session_id:'22222222-2222-4222-8222-222222222222',is_error:fa
       if (spec.stdio.stdout !== 'pipe') child.stdout.on('data', (chunk) => (output += chunk));
       let errors = '';
       child.stderr.on('data', (chunk) => (errors += chunk));
-      child.stdin.end(spec.stdio.stdin === 'ignore' ? undefined : spec.stdio.stdin.text);
+      // Follows the real subprocess service: 'pipe' stays open for the caller, { data } is written and ended.
+      const stdinMode = spec.stdio.stdin; if (stdinMode === 'ignore') child.stdin.end(); else if (typeof stdinMode === 'object') child.stdin.end(stdinMode.data);
       const done = new Promise((resolve, reject) => {
         child.once('error', reject);
         child.once('close', (exitCode, signal) => {
@@ -99,6 +100,7 @@ say({type:'result',session_id:'22222222-2222-4222-8222-222222222222',is_error:fa
       spec.signal.addEventListener('abort', stop, { once: true });
       void done.finally(() => spec.signal.removeEventListener('abort', stop));
       return {
+        stdin: stdinMode === 'pipe' ? child.stdin : undefined,
         stdout: child.stdout,
         done,
         collected: { stdout: { readFrom: () => ({ text: output, lossy: false }) }, stderr: { readFrom: () => ({ text: errors, lossy: false }) } },
