@@ -1558,6 +1558,7 @@ test('owned global registrations in src use the Waycraft namespace', async () =>
           'standard',
           'fast',
           'oauth',
+          'official-cli',
           'keychain',
         ].includes(id) && !/^(claude|grok)-/.test(id),
     ))

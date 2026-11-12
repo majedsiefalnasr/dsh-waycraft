@@ -7039,6 +7039,19 @@ var subscriptions$1 = {
 	"cancel": "Cancel",
 	"confirm": "Consume 1 reset",
 	"login": "Log in",
+	"accessMethod": "Access method",
+	"cliLoginFailed": "CLI sign-in could not be verified. Review the terminal output, cancel this attempt, then try again.",
+	"cliAccountControlsPending": "Official CLI account removal will be available in a later update.",
+	"cliTerminalInput": "CLI terminal input (Enter to send)",
+	"officialCli": "Official CLI",
+	"claudeCliMissing": "Claude Code was not found. Install it yourself, then try again. No account has been created.",
+	"directSignIn": "Direct sign-in",
+	"warningInfo": "Information",
+	"warningDanger": "High risk",
+	"warningSource": "Source",
+	"warningReviewed": "Last reviewed:",
+	"claudeOfficialCliWarning": "Official CLI uses Claude Code's own sign-in and login storage. Provider terms and subscription limits still apply.",
+	"claudeDirectWarning": "Danger: direct sign-in uses subscription credentials outside the official CLI. This may conflict with provider terms and put your account at risk.",
 	"checking": "Checking…",
 	"usageTitle": "Usage",
 	"plan": "Plan",
@@ -7703,6 +7716,19 @@ var subscriptions = {
 	"cancel": "إلغاء",
 	"confirm": "استهلاك رصيد واحد",
 	"login": "تسجيل الدخول",
+	"accessMethod": "طريقة الوصول",
+	"cliLoginFailed": "تعذّر التحقق من تسجيل الدخول. راجع مخرجات الطرفية، ثم ألغِ هذه المحاولة وأعد المحاولة.",
+	"cliAccountControlsPending": "ستتوفر إزالة حساب واجهة CLI الرسمية في تحديث لاحق.",
+	"cliTerminalInput": "إدخال الطرفية (اضغط Enter للإرسال)",
+	"officialCli": "واجهة CLI الرسمية",
+	"claudeCliMissing": "لم يُعثر على Claude Code. ثبّته بنفسك ثم أعد المحاولة. لم يُنشأ أي حساب.",
+	"directSignIn": "تسجيل الدخول المباشر",
+	"warningInfo": "معلومة",
+	"warningDanger": "مخاطر عالية",
+	"warningSource": "المصدر",
+	"warningReviewed": "آخر مراجعة:",
+	"claudeOfficialCliWarning": "تستخدم واجهة CLI الرسمية تسجيل الدخول وتخزين بياناته الخاصين بـ Claude Code. تظل شروط المزود وحدود الاشتراك سارية.",
+	"claudeDirectWarning": "خطر: يستخدم تسجيل الدخول المباشر بيانات اعتماد الاشتراك خارج واجهة CLI الرسمية. قد يتعارض ذلك مع شروط المزود ويعرّض حسابك للخطر.",
 	"checking": "جارٍ التحقق…",
 	"usageTitle": "الاستخدام",
 	"plan": "الخطة",
@@ -10925,6 +10951,11 @@ function createCopilotCard(React, primitives$1, rpc, t) {
 
 //#endregion
 //#region src/claude-card.ts
+/** Locale keys for a warning level, kept outside `t(...)` so the level names are not read as keys. */
+const WARNING_LEVEL_KEYS = {
+	info: "warningInfo",
+	danger: "warningDanger"
+};
 /**
 * Claude Settings card. Scoped presentation port of the Claude part of V1ki v0.9.12 b802311
 * SubscriptionsSection; see PROVENANCE.md. It only ever receives sanitized status from the owned RPC: account
@@ -10944,6 +10975,52 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 		const [pending, setPending] = React.useState(false);
 		const [login, setLogin] = React.useState(null);
 		const [input, setInput] = React.useState("");
+		const [accessMethod, setAccessMethod] = React.useState(null);
+		const [cliInstallation, setCliInstallation] = React.useState(null);
+		const [terminalInput, setTerminalInput] = React.useState("");
+		React.useEffect(() => {
+			const loginId = login?.loginId;
+			if (!loginId) return;
+			let cancelled = false;
+			let reading = false;
+			let timer;
+			const read = async () => {
+				if (reading) return;
+				reading = true;
+				try {
+					const value = await call("cliRead", { loginId });
+					if (cancelled || !alive.current) return;
+					setLogin((previous) => previous?.loginId === loginId ? {
+						...previous,
+						...value
+					} : previous);
+					if (value.state === "failed") clearInterval(timer);
+					if (value.state === "authenticated") {
+						clearInterval(timer);
+						await call("cliCancel", { loginId });
+						if (cancelled || !alive.current) return;
+						setLogin(null);
+						await refreshStatus();
+					}
+				} catch (failure) {
+					clearInterval(timer);
+					if (!cancelled && alive.current) {
+						setLogin(null);
+						setError(failure instanceof Error ? failure.message : String(failure));
+					}
+				} finally {
+					reading = false;
+				}
+			};
+			read();
+			timer = setInterval(() => {
+				read();
+			}, 500);
+			return () => {
+				cancelled = true;
+				clearInterval(timer);
+			};
+		}, [login?.loginId]);
 		const [usage, setUsage] = React.useState({});
 		const [confirmation, setConfirmation] = React.useState(null);
 		const alive = React.useRef(true);
@@ -11035,7 +11112,9 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 			accountKeys.current = keys;
 			for (const key of usageRequests.current.keys()) if (!keys.has(key)) usageRequests.current.delete(key);
 			setUsage((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => keys.has(key))));
-			if (presentation !== "auth") for (const key of added) refreshUsage(key);
+			if (presentation !== "auth") {
+				for (const key of added) if (status.accounts.find((account) => account.key === key)?.accessMethod !== "official-cli") refreshUsage(key);
+			}
 		}, [accountsSignature]);
 		const button = (label, onClick, disabled = false, props = {}) => h(Button, {
 			type: "button",
@@ -11044,16 +11123,29 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 			...props
 		}, label);
 		const date = (time) => new Date(time).toLocaleString();
+		const warning = (method, tag, dataAttribute) => h(tag, {
+			key: method.id,
+			role: "note",
+			style: styles$3.statusLine,
+			[dataAttribute]: method.warning.level
+		}, h("strong", null, t(WARNING_LEVEL_KEYS[method.warning.level])), ": ", t(method.warning.text), " ", h("a", {
+			href: method.warning.source,
+			target: "_blank",
+			rel: "noopener noreferrer"
+		}, t("warningSource")), " ", t("warningReviewed"), " ", method.warning.lastReviewed);
 		const part = (name$1, style, ...children) => h("div", {
 			style,
 			"data-waycraft-claude-part": name$1
 		}, ...children);
+		const officialCli = (status?.capabilities ? accessMethod ?? status.capabilities.defaultAccessMethod : void 0) === "official-cli";
 		const startLogin = (method) => {
 			action(async () => {
-				const result = await call("login", method === void 0 ? {} : { method });
+				const selected = officialCli ? "official-cli" : method;
+				const result = await call("login", selected === void 0 ? {} : { method: selected });
 				if (!alive.current) return;
+				setCliInstallation(result.available === false ? result : null);
 				if (result.authorizeUrl) window.open(result.authorizeUrl, "_blank", "noopener");
-				setLogin(result.authorizeUrl ? result : null);
+				setLogin(result.authorizeUrl || result.loginId ? result : null);
 				await refreshStatus();
 			});
 		};
@@ -11125,17 +11217,26 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 					await call("setDefault", { account: account.key });
 					await refreshStatus();
 				});
-			}, false, {
+			}, account.accessMethod === "official-cli", {
 				style: styles$3.starButton,
 				title: t(account.isDefault ? "defaultAccount" : "makeDefault"),
 				"aria-label": t(account.isDefault ? "defaultAccount" : "makeDefault")
 			}), h("bdi", {
 				dir: "ltr",
 				style: styles$3.accountName
-			}, account.alias || account.account || account.key), account.plan ? h("bdi", { style: styles$3.usagePlan }, account.plan) : null, account.expiresAt ? h("span", { style: styles$3.statusLine }, t("expires"), " ", h("bdi", null, date(account.expiresAt))) : null, button(t("logout"), () => setConfirmation({
+			}, account.alias || account.account || account.key), h("span", {
+				style: styles$3.statusLine,
+				"data-waycraft-account-access-method": account.accessMethod ?? "direct"
+			}, t(account.accessMethod === "official-cli" ? "officialCli" : "directSignIn")), account.accessMethod === "official-cli" ? h("p", { style: {
+				...styles$3.statusLine,
+				overflowWrap: "anywhere"
+			} }, h("bdi", null, account.cliPath), " ", h("bdi", null, account.cliVersion)) : null, ...(status?.capabilities?.accessMethods ?? []).filter((method) => method.id === (account.accessMethod ?? "direct")).map((method) => warning(method, "span", "data-waycraft-account-warning")), account.plan ? h("bdi", { style: styles$3.usagePlan }, account.plan) : null, account.expiresAt ? h("span", { style: styles$3.statusLine }, t("expires"), " ", h("bdi", null, date(account.expiresAt))) : null, button(t("logout"), () => setConfirmation({
 				account: account.key,
 				label: account.account
-			}), false, { style: { marginInlineStart: "auto" } })), snapshot?.supported === false ? h("p", { style: styles$3.statusLine }, t("usageUnavailable")) : part("usage", styles$3.usage, part("usage-header", styles$3.usageHeader, h("span", { style: styles$3.usageTitle }, t("usageTitle")), button(t("refreshUsage"), () => {
+			}), account.accessMethod === "official-cli", {
+				style: { marginInlineStart: "auto" },
+				title: account.accessMethod === "official-cli" ? t("cliAccountControlsPending") : void 0
+			})), account.accessMethod === "official-cli" || snapshot?.supported === false ? h("p", { style: styles$3.statusLine }, t("usageUnavailable")) : part("usage", styles$3.usage, part("usage-header", styles$3.usageHeader, h("span", { style: styles$3.usageTitle }, t("usageTitle")), button(t("refreshUsage"), () => {
 				action(() => refreshUsage(account.key, true));
 			}, false, { style: styles$3.usageRefresh })), !snapshot ? h("p", { style: styles$3.statusLine }, t("usageNotLoaded")) : snapshot.error ? h("p", {
 				style: styles$3.errorLine,
@@ -11165,7 +11266,65 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 				setLogin(null);
 				await refreshStatus();
 			});
-		}) : hasAccounts ? [button(t("addAccountOAuth"), () => startLogin("oauth"), !!status?.registrationError, { key: "oauth" }), button(t("addAccountKeychain"), () => startLogin("keychain"), !!status?.registrationError, { key: "keychain" })] : button(t("login"), () => startLogin(), !!status?.registrationError)), presentation !== "group" && !busy && hasAccounts ? h("p", { style: styles$3.statusLine }, t("claudeAddAccountHint")) : null, busy ? h("div", null, (status.pendingAuth ?? login)?.authorizeUrl ? h("a", {
+		}) : officialCli ? button(t("login"), () => startLogin(), !!status.registrationError || !!login?.loginId) : hasAccounts ? [button(t("addAccountOAuth"), () => startLogin("oauth"), !!status?.registrationError, { key: "oauth" }), button(t("addAccountKeychain"), () => startLogin("keychain"), !!status?.registrationError, { key: "keychain" })] : button(t("login"), () => startLogin(), !!status?.registrationError)), !busy && status?.capabilities?.accessMethods.length > 1 ? h("select", {
+			"data-waycraft-access-method": true,
+			"aria-label": t("accessMethod"),
+			value: accessMethod ?? status.capabilities.defaultAccessMethod,
+			onChange: (event) => setAccessMethod(event.target.value)
+		}, ...status.capabilities.accessMethods.map((method) => h("option", {
+			key: method.id,
+			value: method.id
+		}, t(method.id === "official-cli" ? "officialCli" : "directSignIn")))) : null, login?.loginId ? h("section", {
+			"data-waycraft-cli-terminal": true,
+			"aria-label": t("officialCli"),
+			dir: "ltr"
+		}, h("p", { style: styles$3.statusLine }, h("bdi", null, login.path), " ", h("bdi", null, login.version)), login.state === "failed" ? h("p", {
+			role: "alert",
+			style: styles$3.errorLine
+		}, t("cliLoginFailed")) : null, h("pre", {
+			role: "log",
+			style: {
+				whiteSpace: "pre-wrap",
+				overflowWrap: "anywhere"
+			}
+		}, login.output ?? ""), h("input", {
+			"data-waycraft-cli-input": true,
+			"aria-label": t("cliTerminalInput"),
+			value: terminalInput,
+			maxLength: 4095,
+			autoComplete: "off",
+			onChange: (event) => setTerminalInput(event.target.value),
+			onKeyDown: (event) => {
+				if (event.key !== "Enter") return;
+				event.preventDefault();
+				action(async () => {
+					await call("cliInput", {
+						loginId: login.loginId,
+						data: terminalInput + "\r"
+					});
+					setTerminalInput("");
+				});
+			}
+		}), button(t("cancelLogin"), () => {
+			action(async () => {
+				await call("cliCancel", { loginId: login.loginId });
+				setLogin(null);
+				setTerminalInput("");
+			});
+		})) : null, cliInstallation ? h("div", {
+			role: "status",
+			style: styles$3.statusLine
+		}, t("claudeCliMissing"), h("pre", {
+			dir: "ltr",
+			style: {
+				whiteSpace: "pre-wrap",
+				overflowWrap: "anywhere"
+			}
+		}, cliInstallation.installCommand), h("a", {
+			href: cliInstallation.source,
+			target: "_blank",
+			rel: "noopener noreferrer"
+		}, t("warningSource"))) : null, !busy && status?.capabilities ? status.capabilities.accessMethods.filter((method) => method.id === (accessMethod ?? status.capabilities.defaultAccessMethod)).map((method) => warning(method, "div", "data-waycraft-access-warning")) : null, presentation !== "group" && !busy && hasAccounts && !officialCli ? h("p", { style: styles$3.statusLine }, t("claudeAddAccountHint")) : null, busy ? h("div", null, (status.pendingAuth ?? login)?.authorizeUrl ? h("a", {
 			href: (status.pendingAuth ?? login).authorizeUrl,
 			target: "_blank",
 			rel: "noopener noreferrer",

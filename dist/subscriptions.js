@@ -31,6 +31,8 @@ import { CodexWebSearchProvider } from './providers/codex-search.js';
 import { createImageGenerateTool } from './tools/image-generate.js';
 import { registerWithAlias } from './tools/registration.js';
 import { AccountPreferencesAdapter, accountAllowsPool, accountModelId, parseAccountModelId, } from './providers/account-preferences.js';
+import { CLAUDE_CAPABILITIES } from './provider-capabilities.js';
+import { ClaudeCliLogin, discoverClaudeCli, } from './auth/claude-cli.js';
 import { ClaudeAuthController, } from './auth/claude-controller.js';
 import { readClaudeCodeCredentials, recordClaudeEmail, refreshClaudeSynced, SYSTEM_CLAUDE_CREDS_IO, } from './auth/claude-code-creds.js';
 import { ClaudeAdapter, CLAUDE_PREEMPT_MS, fetchClaudeProfile, fetchClaudeUsage, isClaudePermanentRefreshError, refreshClaude, } from './providers/claude.js';
@@ -201,12 +203,16 @@ function readLoginMethod(payload, provider) {
         return undefined;
     if (provider !== 'claude')
         throw new Error('payload.method is only valid for claude');
-    if (method !== 'oauth' && method !== 'keychain')
-        throw new Error('payload.method must be "oauth" or "keychain"');
+    if (method !== 'oauth' && method !== 'keychain' && method !== 'official-cli')
+        throw new Error('payload.method must be "oauth", "keychain" or "official-cli"');
     return method;
 }
 /** Endpoints that serve Claude; every other endpoint (speed, reset, proxy, image, video) stays Codex-only. */
 const CLAUDE_ENDPOINTS = new Set([
+    'cliDiscover',
+    'cliInput',
+    'cliRead',
+    'cliCancel',
     'status',
     'login',
     'manual',
@@ -496,6 +502,15 @@ export function apply(ctx, config = {}, options = {}) {
                     ? async () => fetchGrokUsage(await grokTokens.session(account), proxiedFetch, AbortSignal.timeout(20_000))
                     : undefined);
     const auth = new CodexAuthController(flows, changed, (error) => browserSafeError(error, 'codex login'));
+    const claudeCliLogin = new ClaudeCliLogin();
+    // `subprocess` is optional: a composition without it keeps every other provider working, and only Official CLI
+    // operations report that the service is missing.
+    const cliRuntime = () => {
+        const runtime = ctx.get('subprocess');
+        if (!runtime)
+            throw new Error('Official CLI requires the DSH subprocess service, which is not available in this composition');
+        return runtime;
+    };
     const claudeAuth = new ClaudeAuthController(flows, claudeChanged, (error) => browserSafeError(error, 'claude login'), () => readClaudeCodeCredentials(claudeCredsIo), (session) => recordClaudeEmail(session, claudeIdentity, claudeLifecycle.signal));
     const resets = new ResetRedemption(readUsage, async (account, credit, request, signal) => consumeCodexResetCredit(await tokens.session(account), credit, request, proxiedFetch, signal), (account) => usage.invalidate('codex', account));
     adapter = new CodexAdapter({
@@ -809,7 +824,7 @@ export function apply(ctx, config = {}, options = {}) {
         ctx.logger.warn(`dsh-waycraft: antigravity registration failed (${error?.code ?? error?.name ?? 'unknown'})`);
         antigravityCollision = true;
     }
-    ctx.effect(() => () => {
+    ctx.effect(() => async () => {
         disposed = true;
         stopWebSearch?.();
         stopWebSearch = undefined;
@@ -821,6 +836,7 @@ export function apply(ctx, config = {}, options = {}) {
         claudeLifecycle.abort();
         auth.dispose();
         claudeAuth.dispose();
+        await claudeCliLogin.dispose();
         // Transport teardown is async; a failure must be logged, not become an unhandled rejection.
         return disposeProxyTransport().catch((error) => ctx.logger.warn(`dsh-waycraft: proxy transport disposal failed (${error?.code ?? error?.name ?? 'unknown'})`));
     }, 'dsh-waycraft: subscriptions auth disposal');
@@ -968,6 +984,10 @@ export function apply(ctx, config = {}, options = {}) {
             'setZenEnabled',
             'image',
             'video',
+            'cliDiscover',
+            'cliInput',
+            'cliRead',
+            'cliCancel',
             'status',
             'login',
             'manual',
@@ -1074,6 +1094,32 @@ export function apply(ctx, config = {}, options = {}) {
                                 };
                                 break;
                             }
+                            case 'cliRead': {
+                                if (provider !== 'claude')
+                                    throw new Error('Official CLI terminal is only available for Claude');
+                                value = await claudeCliLogin.read(string('loginId'));
+                                break;
+                            }
+                            case 'cliInput': {
+                                if (provider !== 'claude')
+                                    throw new Error('Official CLI terminal is only available for Claude');
+                                await claudeCliLogin.input(string('loginId'), string('data'));
+                                value = { accepted: true };
+                                break;
+                            }
+                            case 'cliCancel': {
+                                if (provider !== 'claude')
+                                    throw new Error('Official CLI terminal is only available for Claude');
+                                await claudeCliLogin.cancel(string('loginId'));
+                                value = { cancelled: true };
+                                break;
+                            }
+                            case 'cliDiscover': {
+                                if (provider !== 'claude')
+                                    throw new Error('Official CLI discovery is only available for Claude');
+                                value = await discoverClaudeCli(cliRuntime());
+                                break;
+                            }
                             case 'status': {
                                 const state = await auth.status();
                                 // Never resolve npm client metadata for a provider with no saved login.
@@ -1155,11 +1201,19 @@ export function apply(ctx, config = {}, options = {}) {
                                             : {
                                                 claude: {
                                                     ...claudeState,
+                                                    capabilities: CLAUDE_CAPABILITIES,
                                                     displayName: preferences.get('claude').displayName,
-                                                    accounts: claudeState.accounts.map((account) => ({
-                                                        ...account,
-                                                        alias: ownAlias('claude', account.key),
-                                                    })),
+                                                    accounts: [
+                                                        ...claudeState.accounts.map((account) => ({
+                                                            ...account,
+                                                            accessMethod: 'direct',
+                                                            alias: ownAlias('claude', account.key),
+                                                        })),
+                                                        ...(await claudeCliLogin.accounts()).map((account) => ({
+                                                            ...account,
+                                                            alias: ownAlias('claude', account.key),
+                                                        })),
+                                                    ],
                                                     clientVersion: claudeAccounts.length
                                                         ? await presentClaudeVersion()
                                                         : undefined,
@@ -1492,6 +1546,10 @@ export function apply(ctx, config = {}, options = {}) {
                                 if (provider === 'claude') {
                                     if (claudeCollision)
                                         throw new Error('Claude is already registered. Disable the reference component first.');
+                                    if (method === 'official-cli') {
+                                        value = await claudeCliLogin.login(cliRuntime());
+                                        break;
+                                    }
                                     value = await claudeAuth.login(method);
                                     break;
                                 }

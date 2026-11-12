@@ -451,6 +451,27 @@ async function fixture(provider) {
           select.props.onChange({ target: { value: provider } }),
         );
         await settle();
+        if (provider === 'claude') {
+          // Official CLI is the preselected Claude access method; these flows exercise Direct sign-in.
+          const method = () =>
+            renderer.root
+              .findAll(
+                (n) =>
+                  n.type === 'select' && n.props['data-waycraft-access-method'],
+              )
+              .at(-1);
+          // While an attempt is pending the selector is hidden and the pending view owns the flow.
+          await until(
+            () => !!method() || buttons('cancelLogin').length > 0,
+            'Claude access method selector',
+          );
+          if (method()) {
+            await act(async () =>
+              method().props.onChange({ target: { value: 'direct' } }),
+            );
+            await settle();
+          }
+        }
       },
       async start(key) {
         await click(key ?? 'login');
