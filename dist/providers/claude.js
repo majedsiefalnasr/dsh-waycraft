@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import { claudeCliMissingFlagMessage, claudeCliUpdateMessage, discoverClaudeCli, prepareClaudeCliAccountDirectory, probeClaudeCliFlags, SCRUBBED_ENV } from '../auth/claude-cli.js';
+import { answerControlRequest, approvalsDisabled, controlErrorLine, controlResponseLine, permissionModeFor } from '../auth/claude-cli-control.js';
 import { planCliArguments, refusedFlag } from '../auth/cli-flags.js';
 import { translateClaudeCliStream } from '../translate/claude-cli.js';
 import { EMPTY_RESPONSE_CODE, errorChain, LlmAdapter, LlmError, ReasoningEffortId, } from '@deepseek-ai/dsh-llm';
@@ -779,6 +780,9 @@ export class ClaudeAdapter extends LlmAdapter {
         // A new CLI session has no transcript. Preserve DSH's text history as a
         // single contextual prompt; a resumed session already owns that history.
         const text = prior || options.messages.length === 1 ? messageText(prompt) : options.messages.map((message) => `[${message.role}]\n${messageText(message)}`).join('\n\n');
+        const permissionMode = permissionModeFor(options.messages);
+        const promptsDisabled = approvalsDisabled(options.messages);
+        const images = await this.promptImages(prompt, options.signal);
         const parts = [
             ...(options.system ? [{ flag: '--system-prompt', args: ['--system-prompt', options.system] }] : []),
             { flag: '--print', args: ['-p'] },
@@ -788,6 +792,11 @@ export class ClaudeAdapter extends LlmAdapter {
             // Without partial events the translator reads the completed messages instead.
             { flag: '--include-partial-messages', args: ['--include-partial-messages'], optional: true },
             { flag: '--model', args: ['--model', options.model] },
+            // Permission prompts, questions and plan reviews come back as control requests that become DSH dialogs.
+            // An older CLI without these flags still runs: it then denies what needs a prompt instead of asking.
+            { flag: '--permission-mode', args: ['--permission-mode', permissionMode], optional: true },
+            { flag: '--permission-prompt-tool', args: ['--permission-prompt-tool', 'stdio'], optional: true },
+            { flag: '--tools', args: ['--tools', 'default'], optional: true },
             prior ? { flag: '--resume', args: ['--resume', prior] } : { flag: '--session-id', args: ['--session-id', randomUUID()] },
         ];
         const plan = planCliArguments(parts, supported, refused);
@@ -801,11 +810,49 @@ export class ClaudeAdapter extends LlmAdapter {
         const watchdog = idleWatchdog(caller, this.options.streamIdleTimeoutMs);
         const signal = watchdog.signal;
         signal.throwIfAborted();
-        const handle = runtime.spawn({ argv, cwd: directory, env: { CLAUDE_CONFIG_DIR: directory, ...SCRUBBED_ENV }, stdio: { stdin: { text: JSON.stringify({ type: 'user', session_id: '', parent_tool_use_id: null, message: { role: 'user', content: text } }) + '\n' }, stdout: 'pipe', stderr: { maxBytes: 64 * 1024 } }, graceMs: 1000, signal });
+        // stdin stays open for the whole turn so control replies can be written; it is ended when the result arrives.
+        const handle = runtime.spawn({ argv, cwd: directory, env: { CLAUDE_CONFIG_DIR: directory, ...SCRUBBED_ENV }, stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 64 * 1024 } }, graceMs: 1000, signal });
         const turn = { controller, closed: handle.waitForExit() };
         this.cliTurns.add(turn);
         // Observe spawn failures immediately, including while the output iterator is pending.
         void handle.done.catch(() => { });
+        const stdin = handle.stdin;
+        stdin?.on('error', () => { });
+        const writeToCli = (line) => {
+            if (!stdin || stdin.destroyed || stdin.writableEnded)
+                return false;
+            return stdin.write(line);
+        };
+        const endStdin = () => { if (stdin && !stdin.destroyed && !stdin.writableEnded)
+            stdin.end(); };
+        // Dialogs the Owner has not answered yet, by request id. A dialog ends when answered, when the CLI withdraws it,
+        // or when the turn ends or is aborted: its signal is the turn's signal, so none is left open.
+        const dialogs = new Map();
+        const services = this.options.cliServices?.(options.sessionId) ?? {};
+        // A person thinking over a dialog is not an idle stream: keep the idle watchdog from ending the turn meanwhile.
+        const keepAlive = setInterval(() => { if (dialogs.size > 0)
+            watchdog.pulse(); }, 15_000);
+        keepAlive.unref();
+        const handleControl = (frame) => {
+            const id = typeof frame.request_id === 'string' ? frame.request_id : undefined;
+            const request = frame.request && typeof frame.request === 'object' && !Array.isArray(frame.request) ? frame.request : undefined;
+            if (id === undefined || request === undefined)
+                return;
+            if (request.subtype !== 'can_use_tool') {
+                writeToCli(controlErrorLine(id, `${String(request.subtype ?? 'unknown')} requests are not supported by Waycraft`));
+                return;
+            }
+            const dialog = new AbortController();
+            dialogs.set(id, dialog);
+            const dialogSignal = AbortSignal.any([signal, dialog.signal]);
+            // Without a tool_use_id the request id keeps two concurrent prompts for one tool apart.
+            const named = typeof request.tool_use_id === 'string' ? request : { ...request, tool_use_id: id };
+            void answerControlRequest(named, services, dialogSignal, promptsDisabled).then((result) => {
+                // A dialog the CLI withdrew, or a turn that ended, has nobody left to read the answer.
+                if (!dialog.signal.aborted && !signal.aborted)
+                    writeToCli(controlResponseLine(id, result));
+            }).catch(() => { }).finally(() => { dialogs.delete(id); });
+        };
         let retryMissing = false;
         let retryWithoutFlag = false;
         let emitted = false;
@@ -813,6 +860,10 @@ export class ClaudeAdapter extends LlmAdapter {
         try {
             if (!handle.stdout)
                 throw new Error('Claude CLI subprocess omitted stdout pipe');
+            // Without a writable stdin the prompt could not be sent and the CLI would wait on empty input.
+            if (!stdin)
+                throw new Error('Claude CLI subprocess omitted stdin pipe');
+            writeToCli(JSON.stringify({ type: 'user', session_id: '', parent_tool_use_id: null, message: { role: 'user', content: images.length ? [{ type: 'text', text }, ...images] : text } }) + '\n');
             const stdout = handle.stdout;
             async function* observedLines() {
                 const decoder = new StringDecoder('utf8');
@@ -827,12 +878,26 @@ export class ClaudeAdapter extends LlmAdapter {
                         if (Buffer.byteLength(line, 'utf8') > 1024 * 1024)
                             throw new Error('Claude CLI output frame exceeds 1 MiB');
                         // Only the CLI's own error result is rejection evidence; assistant text never is.
+                        let frame;
                         try {
-                            const frame = JSON.parse(line);
-                            if (frame.type === 'result' && frame.is_error === true && typeof frame.result === 'string')
-                                outputEvidence += frame.result + '\n';
+                            frame = JSON.parse(line);
                         }
                         catch { /* not a JSON frame */ }
+                        if (frame?.type === 'result' && frame.is_error === true && typeof frame.result === 'string')
+                            outputEvidence += frame.result + '\n';
+                        // Control frames are answered here and never reach the translator.
+                        if (frame?.type === 'control_request') {
+                            handleControl(frame);
+                            continue;
+                        }
+                        if (frame?.type === 'control_cancel_request') {
+                            if (typeof frame.request_id === 'string')
+                                dialogs.get(frame.request_id)?.abort();
+                            continue;
+                        }
+                        // The CLI waits for more input until stdin ends, so ending it after the result lets the process exit.
+                        if (frame?.type === 'result')
+                            endStdin();
                         yield line;
                     }
                     if (Buffer.byteLength(pending, 'utf8') > 1024 * 1024)
@@ -869,6 +934,10 @@ export class ClaudeAdapter extends LlmAdapter {
                 throw mapFetchFailure('Claude CLI', error, watchdog, options.signal);
         }
         finally {
+            clearInterval(keepAlive);
+            for (const dialog of dialogs.values())
+                dialog.abort();
+            endStdin();
             watchdog.stop();
             try {
                 await handle.terminate();
@@ -882,6 +951,15 @@ export class ClaudeAdapter extends LlmAdapter {
             yield* this.runCliAccount(options, loginId, fresh);
         else if (retryMissing)
             yield* this.runCliAccount(options, loginId, true);
+    }
+    /** The images attached to the prompt, as the CLI's stream-json image blocks; files already arrive as text with a read-only path. */
+    async promptImages(prompt, signal) {
+        if (typeof prompt.content === 'string' || !prompt.content.some((part) => part.type === 'image'))
+            return [];
+        const [resolved] = await resolveImages([prompt], this.options.resolveAttachments?.(), signal, CLAUDE_IMAGE_LIMIT);
+        return (resolved?.content ?? []).flatMap((part) => part.type === 'image' && 'dataBase64' in part
+            ? [{ type: 'image', source: { type: 'base64', media_type: part.mediaType, data: part.dataBase64 } }]
+            : []);
     }
     async *streamCore(options, account) {
         const watchdog = idleWatchdog(options.signal, this.options.streamIdleTimeoutMs);

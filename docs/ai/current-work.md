@@ -1,5 +1,9 @@
 # Current work
 
+## Ticket #184 — 2026-11-13 (completed)
+
+Completed #184 only: inline CLI tool activity, approvals, questions and plan reviews through DSH dialogs over the CLI's stdio control channel, permission-mode mapping with an asking-mode fallback (typed text never selects a mode), image delivery, abort withdrawal, and the stdin contract correction (`pipe` and `{ data }`). Real DSH tool cards moved to #210 (blocked by #184, `ready-for-human`, waits for the Owner's live check). Final gates: build, `tsc` (three projects), lint, all 1539 tests, `check:build` and `git diff --check` passed; independent Standards/Spec review findings were fixed or recorded as accepted, and the plan-review provenance and MIT notice were added. No real CLI or installed DSH was exercised. Live items for #195: `can_use_tool` frames from a real CLI, DSH's real dialog answer shape, file handle text. See [implementation evidence](ticket-184-implementation.md).
+
 ## Ticket #183 — 2026-11-12 (completed)
 
 Completed #183 only: provider-declared minimum CLI version (update message with the official command on the card and in the session, no run starts), `--help` flag probe with optional flags dropped and required ones reported by name, and a single non-looping retry for an optional flag refused at run time. Final gates and independent review recorded in [implementation evidence](ticket-183-implementation.md). No live CLI, sign-in, billing or installed-app verification. No push, main merge, release or npm publication. No next ticket started.

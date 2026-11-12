@@ -1,13 +1,15 @@
 import { mkdir, readFile, writeFile, rename, rm, lstat, readdir, symlink, copyFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths';
 import { CLAUDE_CAPABILITIES } from '../provider-capabilities.js';
 import { compareVersions } from '../providers/npm-cli-version.js';
 import { parseHelpFlags } from './cli-flags.js';
 
 export interface CliProcess {
+  /** Present when the process was started with `stdin: 'pipe'`; it stays open until the caller ends it. */
+  stdin?: Writable;
   stdout?: Readable;
   done: Promise<{ exitCode: number | null; signal: string | null }>;
   collected: {
@@ -39,7 +41,8 @@ export interface ClaudeCliRuntime {
     cwd: string;
     env: Record<string, string | undefined>;
     stdio: {
-      stdin: 'ignore' | { text: string };
+      // The subprocess service accepts these three forms; `{ data }` is written and ended, `'pipe'` stays open.
+      stdin: 'ignore' | 'pipe' | { data: string };
       stdout: 'pipe' | { maxBytes: number };
       stderr: { maxBytes: number };
     };

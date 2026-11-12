@@ -10,6 +10,7 @@
 | DeepSeek Harness | 0.2.1-rc.3 / 0.2.1-rc.5 | MIT | Native API-provider UI structure and the add icon |
 | yaml | 2.8.1 | ISC | Skill frontmatter parsing (external runtime dependency) |
 | fflate | 0.8.3 | MIT | ZIP handling (embedded in generated output) |
+| lcestou dsh-oh-my-claude | 1.6.2 | MIT | Plan-review dialog structure and two deny messages for the Claude CLI control channel (#184) |
 
 Per-ticket detail follows.
 
@@ -89,3 +90,27 @@ Ported source added by later components is listed here with its version, commit 
 #158's Skill manager navigation icon vector and `settings.section.icon` registration pattern adapt dsh-skills-manager v1.2.29 (commit 49037a919b87b000de9003a49930425ae9742632) under Apache License 2.0; the complete license remains in `skills/LICENSE-APACHE-2.0` and the record is in `src/PROVENANCE.md`.
 
 #156's destination picker and project-scoped install destinations adapt the behavior of `destination-picker.ts` of dsh-skills-manager v1.2.29 (commit `49037a919b87b000de9003a49930425ae9742632`) under Apache License 2.0; the complete license remains in `skills/LICENSE-APACHE-2.0`. The code is independently authored; details are in `src/PROVENANCE.md`.
+
+#184's plan-review dialog (`src/auth/claude-cli-control.ts`, `src/auth/claude-cli-plan-text.ts`) adapts the structure of the plan-review branch of `decide()` in `lib/server/adapter/class.js` and the plan-review wording of `lib/server/locale.js` from dsh-oh-my-claude 1.6.2 (https://www.npmjs.com/package/dsh-oh-my-claude), MIT License, Copyright (c) 2026 lcestou: the question id convention, the one-question `plan-review` layout with approve and keep-planning options, the approve test, and two deny messages. It is read from the installed package, which is not part of this repository. The rest of the control channel is authored from Anthropic's Agent SDK documentation. The complete MIT permission, inclusion condition and warranty disclaimer for dsh-oh-my-claude follow. See `src/PROVENANCE.md` (#184).
+
+MIT License
+
+Copyright (c) 2026 lcestou
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
