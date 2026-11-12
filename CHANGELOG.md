@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Claude account setup offers Official CLI (default) and Direct sign-in from provider capabilities, with method-specific warnings and policy references in English and Arabic (#180, spec #179). Official CLI discovery reports its path/version or an installation command. Login runs in a Waycraft-owned account directory through an embedded terminal; the CLI owns credentials, including its directory-keyed macOS Keychain entry. Waycraft stores only allowlisted account identity metadata and never adopts the CLI default directory.
+- Official CLI account cards identify their access method. Session execution, usage insights, default-account switching and account removal through CLI remain in their separate follow-up tickets. Focused fake-executable/RPC and React-renderer evidence does not establish live CLI authentication, PTY rendering, or billing behavior; final verification remains pending Owner approval.
+
 ## [0.4.1] - 2026-11-11
 
 Release summary: Subscriptions stops polling absent routes every 3 seconds and stops flapping when a probe of the reference plugin fails (#207, PR #208). Client-side only; no host, storage or Component change.

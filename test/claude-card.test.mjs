@@ -169,6 +169,344 @@ function fixture(
     },
   };
 }
+test('Claude account setup defaults to the capability-declared Official CLI method', async () => {
+  const page = fixture('en', {
+    busy: false,
+    accounts: [],
+    capabilities: {
+      defaultAccessMethod: 'official-cli',
+      accessMethods: [
+        {
+          id: 'official-cli',
+          warning: {
+            level: 'info',
+            text: 'claudeOfficialCliWarning',
+            source: 'https://code.claude.com/docs/en/legal-and-compliance',
+            lastReviewed: '2026-11-11',
+          },
+        },
+        {
+          id: 'direct',
+          warning: {
+            level: 'danger',
+            text: 'claudeDirectWarning',
+            source: 'https://code.claude.com/docs/en/legal-and-compliance',
+            lastReviewed: '2026-11-11',
+          },
+        },
+      ],
+    },
+  });
+  try {
+    page.render();
+    await page.settle();
+    const selector = page
+      .nodes()
+      .find(
+        (node) =>
+          node.tag === 'select' && node.props['data-waycraft-access-method'],
+      );
+    assert.ok(selector);
+    assert.equal(selector.props.value, 'official-cli');
+    page.click('login');
+    await page.settle();
+    assert.equal(
+      page.calls.filter((call) => call.method.endsWith('.login'))[0].payload
+        .method,
+      'official-cli',
+    );
+    assert.ok(page.text().includes('2026-11-11'));
+    assert.ok(
+      page
+        .nodes()
+        .some(
+          (node) =>
+            node.tag === 'a' &&
+            node.props.href ===
+              'https://code.claude.com/docs/en/legal-and-compliance',
+        ),
+    );
+  } finally {
+    page.unmount();
+  }
+});
+
+test('Claude account cards identify the stored access method', async () => {
+  const page = fixture('en', {
+    busy: false,
+    accounts: [
+      {
+        key: 'cli-account',
+        account: 'fixture@example.test',
+        accessMethod: 'official-cli',
+        cliPath: '/fixture/bin/claude',
+        cliVersion: '2.1.322',
+      },
+    ],
+    capabilities: {
+      defaultAccessMethod: 'official-cli',
+      accessMethods: [
+        {
+          id: 'official-cli',
+          warning: {
+            level: 'info',
+            text: 'claudeOfficialCliWarning',
+            source: 'https://code.claude.com/docs/en/legal-and-compliance',
+            lastReviewed: '2026-11-11',
+          },
+        },
+      ],
+    },
+  });
+  try {
+    page.render();
+    await page.settle();
+    assert.ok(page.text().includes(page.dictionary.officialCli));
+    assert.ok(page.text().includes('/fixture/bin/claude'));
+    assert.ok(page.text().includes('2.1.322'));
+    assert.ok(page.text().includes(page.dictionary.claudeOfficialCliWarning));
+    assert.ok(page.text().includes(page.dictionary.warningInfo));
+    assert.equal(
+      page.calls.some(
+        (call) =>
+          call.method.endsWith('.usage') &&
+          call.payload.account === 'cli-account',
+      ),
+      false,
+    );
+    assert.equal(page.has('refreshUsage'), false);
+    const logout = page
+      .nodes()
+      .find(
+        (node) =>
+          node.tag === 'button' && page.textOf(node) === page.dictionary.logout,
+      );
+    assert.equal(logout.props.disabled, true);
+    const defaultButton = page
+      .nodes()
+      .find(
+        (node) =>
+          node.tag === 'button' &&
+          node.props['aria-label'] === page.dictionary.makeDefault,
+      );
+    assert.equal(defaultButton.props.disabled, true);
+    assert.equal(page.has('addAccountKeychain'), false);
+    assert.equal(
+      page.text().includes(page.dictionary.claudeAddAccountHint),
+      false,
+    );
+  } finally {
+    page.unmount();
+  }
+});
+
+test('Claude reports a failed CLI login without discarding its terminal output', async () => {
+  const page = fixture(
+    'en',
+    {
+      busy: false,
+      accounts: [],
+      capabilities: {
+        defaultAccessMethod: 'official-cli',
+        accessMethods: [],
+      },
+    },
+    async (endpoint) =>
+      endpoint === 'login'
+        ? { ok: true, value: { loginId: 'failed-login' } }
+        : endpoint === 'cliRead'
+          ? {
+              ok: true,
+              value: { state: 'failed', output: 'fixture login declined' },
+            }
+          : undefined,
+  );
+  try {
+    page.render();
+    await page.settle();
+    page.click('login');
+    await page.settle();
+    assert.ok(page.text().includes(page.dictionary.cliLoginFailed));
+    assert.ok(page.text().includes('fixture login declined'));
+  } finally {
+    page.unmount();
+  }
+});
+
+test('Claude releases a successful CLI terminal before clearing its presentation', async () => {
+  const page = fixture(
+    'en',
+    {
+      busy: false,
+      accounts: [],
+      capabilities: {
+        defaultAccessMethod: 'official-cli',
+        accessMethods: [],
+      },
+    },
+    async (endpoint) =>
+      endpoint === 'login'
+        ? { ok: true, value: { loginId: 'completed-login' } }
+        : endpoint === 'cliRead'
+          ? { ok: true, value: { state: 'authenticated', output: '' } }
+          : undefined,
+  );
+  try {
+    page.render();
+    await page.settle();
+    page.click('login');
+    await page.settle();
+    assert.ok(
+      page.calls.some(
+        (call) =>
+          call.method.endsWith('.cliCancel') &&
+          call.payload.loginId === 'completed-login',
+      ),
+    );
+  } finally {
+    page.unmount();
+  }
+});
+
+test('Claude retains an active Official CLI login for embedded terminal presentation', async () => {
+  const page = fixture(
+    'en',
+    {
+      busy: false,
+      accounts: [],
+      capabilities: {
+        defaultAccessMethod: 'official-cli',
+        accessMethods: [],
+      },
+    },
+    async (endpoint) =>
+      endpoint === 'login'
+        ? {
+            ok: true,
+            value: {
+              state: 'authenticating',
+              loginId: 'fixture-login',
+              path: '/fixture/bin/claude',
+              version: '2.1.322',
+            },
+          }
+        : undefined,
+  );
+  try {
+    page.render();
+    await page.settle();
+    page.click('login');
+    await page.settle();
+    assert.ok(
+      page.nodes().some((node) => node.props['data-waycraft-cli-terminal']),
+    );
+    assert.ok(page.text().includes('/fixture/bin/claude'));
+    assert.ok(page.text().includes('2.1.322'));
+    assert.ok(
+      page.calls.some(
+        (call) =>
+          call.method.endsWith('.cliRead') &&
+          call.payload.loginId === 'fixture-login',
+      ),
+    );
+    const input = page
+      .nodes()
+      .find((node) => node.props['data-waycraft-cli-input']);
+    assert.ok(input);
+    input.props.onKeyDown({ key: 'Enter', preventDefault() {} });
+    await page.settle();
+    assert.ok(
+      page.calls.some(
+        (call) =>
+          call.method.endsWith('.cliInput') && call.payload.data === '\r',
+      ),
+    );
+    page.click('cancelLogin');
+    await page.settle();
+    assert.ok(
+      page.calls.some(
+        (call) =>
+          call.method.endsWith('.cliCancel') &&
+          call.payload.loginId === 'fixture-login',
+      ),
+    );
+  } finally {
+    page.unmount();
+  }
+});
+
+test('Claude shows installation guidance when Official CLI is missing', async () => {
+  const page = fixture(
+    'en',
+    {
+      busy: false,
+      accounts: [],
+      capabilities: {
+        defaultAccessMethod: 'official-cli',
+        accessMethods: [],
+      },
+    },
+    async (endpoint) =>
+      endpoint === 'login'
+        ? {
+            ok: true,
+            value: {
+              available: false,
+              installCommand: 'fixture-install-claude',
+              source: 'https://code.claude.com/docs/en/setup',
+            },
+          }
+        : undefined,
+  );
+  try {
+    page.render();
+    await page.settle();
+    page.click('login');
+    await page.settle();
+    assert.ok(page.text().includes('fixture-install-claude'));
+  } finally {
+    page.unmount();
+  }
+});
+
+test('Claude hides the access selector when the provider declares only one method', async () => {
+  const page = fixture('en', {
+    busy: false,
+    accounts: [],
+    capabilities: {
+      defaultAccessMethod: 'official-cli',
+      accessMethods: [
+        {
+          id: 'official-cli',
+          warning: {
+            level: 'info',
+            text: 'claudeOfficialCliWarning',
+            source: 'https://code.claude.com/docs/en/legal-and-compliance',
+            lastReviewed: '2026-11-11',
+          },
+        },
+      ],
+    },
+  });
+  try {
+    page.render();
+    await page.settle();
+    assert.equal(
+      page.nodes().some((node) => node.props['data-waycraft-access-method']),
+      false,
+    );
+    page.click('login');
+    await page.settle();
+    assert.equal(
+      page.calls.filter((call) => call.method.endsWith('.login'))[0].payload
+        .method,
+      'official-cli',
+    );
+  } finally {
+    page.unmount();
+  }
+});
+
 const loginCalls = (page) =>
   page.calls.filter((call) => call.method.endsWith('.login'));
 

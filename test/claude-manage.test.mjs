@@ -50,12 +50,88 @@ function load(path) {
       window: { dispatchEvent() {} },
       CustomEvent: class {},
       console,
+      setInterval,
+      clearInterval,
       Error,
     },
     { filename: path },
   );
   return exports;
 }
+const { createClaudeCard } = load(resolve('src/claude-card.ts'));
+
+for (const locale of ['en', 'ar']) {
+  test(`Claude access methods use the real renderer in ${locale}`, async () => {
+    const t = translator(locale);
+    const calls = [];
+    const Card = createClaudeCard(
+      React,
+      {},
+      {
+        async call(_path, method, payload) {
+          calls.push({ method, payload });
+          return {
+            ok: true,
+            value: method.endsWith('.status')
+              ? {
+                  providers: {
+                    claude: {
+                      accounts: [],
+                      busy: false,
+                      capabilities: {
+                        defaultAccessMethod: 'official-cli',
+                        accessMethods: [
+                          {
+                            id: 'official-cli',
+                            warning: {
+                              level: 'info',
+                              text: 'claudeOfficialCliWarning',
+                              source: 'https://example.test/policy',
+                              lastReviewed: '2026-11-11',
+                            },
+                          },
+                          {
+                            id: 'direct',
+                            warning: {
+                              level: 'danger',
+                              text: 'claudeDirectWarning',
+                              source: 'https://example.test/policy',
+                              lastReviewed: '2026-11-11',
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                }
+              : { available: false, installCommand: 'fixture-install' },
+          };
+        },
+      },
+      t,
+    );
+    let page;
+    try {
+      await act(async () => {
+        page = Renderer.create(React.createElement(Card));
+      });
+      const selector = page.root.findByProps({
+        'data-waycraft-access-method': true,
+      });
+      assert.equal(selector.props.value, 'official-cli');
+      assert.ok(text(page.root).includes(t('claudeOfficialCliWarning')));
+      await act(async () => button(page.root, t('login')).props.onClick());
+      assert.equal(
+        calls.find((call) => call.method.endsWith('.login')).payload.method,
+        'official-cli',
+      );
+      assert.ok(text(page.root).includes('fixture-install'));
+    } finally {
+      if (page) await act(async () => page.unmount());
+    }
+  });
+}
+
 const { ProviderAccountManager } = load(
   resolve('src/settings/ProviderAccountManager.tsx'),
 );

@@ -3,10 +3,15 @@
 // every credential, token and HTTP exchange below is a fixture. Nothing touches the real Keychain, ~/.claude or Anthropic.
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, stat, readFile } from 'node:fs/promises';
+import { mkdtemp, stat, readFile, writeFile } from 'node:fs/promises';
+import { spawn as spawnChild } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { apply, CLAUDE_KEYCHAIN_SYNC_MS } from '../dist/subscriptions.js';
+import {
+  apply,
+  inject,
+  CLAUDE_KEYCHAIN_SYNC_MS,
+} from '../dist/subscriptions.js';
 import { ClaudeAuthController } from '../dist/auth/claude-controller.js';
 import { OAuthFlowManager } from '../dist/auth/oauth-flow.js';
 import {
@@ -80,11 +85,12 @@ function fakeIo({ keychain, file, platform = 'darwin' } = {}) {
   };
 }
 
-function host({ io, config = {}, collideClaude = false } = {}) {
+function host({ io, config = {}, collideClaude = false, subprocess } = {}) {
   const routes = new Map(),
     cleanups = [];
   const adapters = {};
   const ctx = {
+    subprocess,
     logger: { warn() {} },
     llm: {
       registerAdapter(ids, value) {
@@ -94,14 +100,17 @@ function host({ io, config = {}, collideClaude = false } = {}) {
         return { replace() {} };
       },
     },
-    get: () => ({
-      fetch: {
-        register(route) {
-          routes.set(route.path, route);
-          return () => routes.delete(route.path);
-        },
-      },
-    }),
+    get: (name) =>
+      name === 'subprocess'
+        ? subprocess
+        : {
+            fetch: {
+              register(route) {
+                routes.set(route.path, route);
+                return () => routes.delete(route.path);
+              },
+            },
+          },
     effect(fn) {
       const cleanup = fn();
       if (cleanup) cleanups.push(cleanup);
@@ -137,11 +146,8 @@ function host({ io, config = {}, collideClaude = false } = {}) {
       );
       return (await response.json()).result;
     },
-    dispose() {
-      cleanups
-        .splice(0)
-        .reverse()
-        .forEach((fn) => fn());
+    async dispose() {
+      for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
     },
   };
 }
@@ -187,6 +193,924 @@ const quiet = async (read, turns = 10) => {
     }
   }
 };
+
+test('Official CLI verifies successful login through scoped auth status and returns only identity metadata', async () => {
+  await home('cli-identity');
+  let finish;
+  const done = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const requests = [];
+  let terminalCount = 0;
+  const h = host({
+    io: fakeIo({}).io,
+    subprocess: {
+      async resolveExecutable() {
+        return '/fixture/bin/claude';
+      },
+      spawn(request) {
+        requests.push(request);
+        const text = request.argv.includes('--version')
+          ? '2.1.322'
+          : JSON.stringify({
+              loggedIn: true,
+              email: 'cli@example.com',
+              subscriptionType: 'max',
+              accessToken: 'never-return-this',
+            });
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return { text, lossy: false };
+              },
+            },
+          },
+          async terminate() {},
+          async waitForExit() {},
+        };
+      },
+      spawnTerminal() {
+        return {
+          done: terminalCount++ === 0 ? done : new Promise(() => {}),
+          async terminate() {},
+        };
+      },
+    },
+  });
+  try {
+    const login = (
+      await h.call('login', { provider: 'claude', method: 'official-cli' })
+    ).value;
+    finish({ exitCode: 0, signal: null });
+    await done;
+    const read = await h.call('cliRead', {
+      provider: 'claude',
+      loginId: login.loginId,
+    });
+    assert.equal(read.value.state, 'authenticated');
+    assert.deepEqual(read.value.identity, {
+      email: 'cli@example.com',
+      subscriptionType: 'max',
+    });
+    assert.deepEqual(requests[1].argv, [
+      '/fixture/bin/claude',
+      'auth',
+      'status',
+      '--json',
+    ]);
+    assert.ok(requests[1].env.CLAUDE_CONFIG_DIR.endsWith(login.loginId));
+    assert.equal(JSON.stringify(read).includes('never-return-this'), false);
+    const { readFile } = await import('node:fs/promises');
+    const { dirname, join } = await import('node:path');
+    const metadataPath = join(dirname(requests[1].cwd), '..', 'accounts.json');
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+    assert.equal(metadata.accounts[login.loginId].accessMethod, 'official-cli');
+    assert.equal(metadata.accounts[login.loginId].email, 'cli@example.com');
+    assert.equal(JSON.stringify(metadata).includes('never-return-this'), false);
+    const accounts = (await h.call('status')).value.providers.claude.accounts;
+    assert.equal(accounts.length, 1);
+    assert.equal(accounts[0].accessMethod, 'official-cli');
+    assert.equal(accounts[0].key, login.loginId);
+    assert.equal(accounts[0].emailAddress, 'cli@example.com');
+    await h.call('cliCancel', { provider: 'claude', loginId: login.loginId });
+    const next = (
+      await h.call('login', { provider: 'claude', method: 'official-cli' })
+    ).value;
+    const nextRead = await h.call('cliRead', {
+      provider: 'claude',
+      loginId: next.loginId,
+    });
+    assert.equal(nextRead.value.identity, undefined);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI discovery executes a fake executable through assembled RPC', async () => {
+  const root = await home('fake-cli-executable');
+  const executable = join(root, 'claude-fixture.mjs');
+  await writeFile(
+    executable,
+    `if (!process.env.CLAUDE_CONFIG_DIR?.startsWith(process.env.DSH_HOME)) process.exit(7); if (process.argv[2] === '--version') console.log('2.1.322 (Claude Code)'); else if (process.argv[3] === 'status') console.log(JSON.stringify({loggedIn:true,email:'executable@example.test',subscriptionType:'max',accessToken:'must-not-escape'})); else if (process.argv[3] !== 'login') process.exit(8);`,
+  );
+  const children = [];
+  const h = host({
+    io: fakeIo({}).io,
+    subprocess: {
+      async resolveExecutable() {
+        return executable;
+      },
+      spawnTerminal(request) {
+        const child = spawnChild(process.execPath, request.argv, {
+          cwd: request.cwd,
+          env: { DSH_HOME: root, ...request.env },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        children.push(child);
+        child.stderr.resume();
+        const done = new Promise((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', (exitCode, signal) =>
+            resolve({ exitCode, signal }),
+          );
+        });
+        return {
+          output: child.stdout,
+          done,
+          async write(data) {
+            child.stdin.write(data);
+          },
+          async terminate() {
+            if (child.exitCode === null && child.signalCode === null)
+              child.kill();
+            await done;
+          },
+        };
+      },
+      spawn(request) {
+        const child = spawnChild(process.execPath, request.argv, {
+          cwd: request.cwd,
+          env: { DSH_HOME: root, ...request.env },
+          stdio: ['ignore', 'pipe', 'pipe'],
+          signal: request.signal,
+        });
+        children.push(child);
+        let text = '';
+        child.stdout.on('data', (chunk) => {
+          text += chunk;
+        });
+        child.stderr.resume();
+        const done = new Promise((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', (exitCode, signal) =>
+            resolve({ exitCode, signal }),
+          );
+        });
+        return {
+          done,
+          collected: {
+            stdout: {
+              readFrom() {
+                return { text, lossy: false };
+              },
+            },
+          },
+          async terminate() {
+            if (child.exitCode === null && child.signalCode === null)
+              child.kill();
+          },
+          async waitForExit() {
+            await done;
+          },
+        };
+      },
+    },
+  });
+  try {
+    const response = await h.call('cliDiscover', { provider: 'claude' });
+    assert.equal(response.value.version, '2.1.322');
+    assert.equal(children.length, 1);
+    assert.equal(children[0].exitCode, 0);
+    const login = await h.call('login', {
+      provider: 'claude',
+      method: 'official-cli',
+    });
+    assert.equal(login.value.path, executable);
+    assert.equal(login.value.version, '2.1.322');
+    await new Promise((resolve) => children.at(-1).once('close', resolve));
+    const result = await h.call('cliRead', {
+      provider: 'claude',
+      loginId: login.value.loginId,
+    });
+    assert.equal(result.value.state, 'authenticated');
+    assert.equal(JSON.stringify(result).includes('must-not-escape'), false);
+    const status = await h.call('status');
+    const account = status.value.providers.claude.accounts.find(
+      (account) => account.emailAddress === 'executable@example.test',
+    );
+    assert.ok(account);
+    assert.equal(account.cliPath, executable);
+    assert.equal(account.cliVersion, '2.1.322');
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI operations report a missing subprocess service while Direct sign-in stays available', async () => {
+  await home('cli-no-subprocess');
+  const h = host({ io: fakeIo({}).io });
+  try {
+    for (const call of [
+      ['cliDiscover', {}],
+      ['login', { method: 'official-cli' }],
+    ]) {
+      const result = await h.call(call[0], { provider: 'claude', ...call[1] });
+      assert.equal(result.ok, false, call[0]);
+      assert.match(result.error.message, /requires the DSH subprocess service/);
+    }
+    assert.equal((await h.call('status')).ok, true);
+    assert.deepEqual(inject, ['llm']);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Disabling Subscriptions waits for the scoped identity process to finish cleanup', async () => {
+  await home('cli-dispose-verification');
+  let finishLogin;
+  let finishStatus;
+  let statusStarted;
+  const started = new Promise((resolve) => {
+    statusStarted = resolve;
+  });
+  const loginDone = new Promise((resolve) => {
+    finishLogin = resolve;
+  });
+  const statusDone = new Promise((resolve) => {
+    finishStatus = resolve;
+  });
+  let statusCleaned = false;
+  const h = host({
+    io: fakeIo({}).io,
+    subprocess: {
+      async resolveExecutable() {
+        return '/fixture/bin/claude';
+      },
+      spawn(request) {
+        const status = !request.argv.includes('--version');
+        if (status) statusStarted();
+        return {
+          done: status
+            ? statusDone
+            : Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return {
+                  text: status ? '{"loggedIn":true}' : '2.1.322',
+                  lossy: false,
+                };
+              },
+            },
+          },
+          async terminate() {},
+          async waitForExit() {
+            if (status) statusCleaned = true;
+          },
+        };
+      },
+      spawnTerminal() {
+        return { done: loginDone, async terminate() {} };
+      },
+    },
+  });
+  await h.call('login', { provider: 'claude', method: 'official-cli' });
+  finishLogin({ exitCode: 0, signal: null });
+  await started;
+  let disposed = false;
+  const disposal = h.dispose().then(() => {
+    disposed = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(disposed, false);
+  finishStatus({ exitCode: 0, signal: null });
+  await disposal;
+  assert.equal(statusCleaned, true);
+});
+
+test('Cancelling CLI login waits for in-flight identity cleanup', async () => {
+  await home('cli-cancel-verification');
+  let finishLogin, finishStatus, signalStarted;
+  const started = new Promise((resolve) => {
+    signalStarted = resolve;
+  });
+  const loginDone = new Promise((resolve) => {
+    finishLogin = resolve;
+  });
+  const statusDone = new Promise((resolve) => {
+    finishStatus = resolve;
+  });
+  const h = host({
+    io: fakeIo({}).io,
+    subprocess: {
+      async resolveExecutable() {
+        return '/fixture/bin/claude';
+      },
+      spawn(request) {
+        const status = !request.argv.includes('--version');
+        if (status) signalStarted();
+        return {
+          done: status
+            ? statusDone
+            : Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return {
+                  text: status ? '{"loggedIn":true}' : '2.1.322',
+                  lossy: false,
+                };
+              },
+            },
+          },
+          async terminate() {},
+          async waitForExit() {},
+        };
+      },
+      spawnTerminal() {
+        return { done: loginDone, async terminate() {} };
+      },
+    },
+  });
+  try {
+    const login = await h.call('login', {
+      provider: 'claude',
+      method: 'official-cli',
+    });
+    finishLogin({ exitCode: 0, signal: null });
+    await started;
+    let cancelled = false;
+    const cancellation = h
+      .call('cliCancel', { provider: 'claude', loginId: login.value.loginId })
+      .then(() => {
+        cancelled = true;
+      });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(cancelled, false);
+    finishStatus({ exitCode: 0, signal: null });
+    await cancellation;
+    assert.deepEqual(
+      (await h.call('status')).value.providers.claude.accounts,
+      [],
+    );
+  } finally {
+    finishStatus({ exitCode: 0, signal: null });
+    await h.dispose();
+  }
+});
+
+test('Cancelling a CLI terminal never starts identity verification when termination exits successfully', async () => {
+  await home('cli-cancel-exit');
+  let finishLogin;
+  let probes = 0;
+  const done = new Promise((resolve) => {
+    finishLogin = resolve;
+  });
+  const h = host({
+    io: fakeIo({}).io,
+    subprocess: {
+      async resolveExecutable() {
+        return '/fixture/bin/claude';
+      },
+      spawn() {
+        probes++;
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return { text: '2.1.322', lossy: false };
+              },
+            },
+          },
+          async terminate() {},
+          async waitForExit() {},
+        };
+      },
+      spawnTerminal() {
+        return {
+          done,
+          async terminate() {
+            finishLogin({ exitCode: 0, signal: null });
+            await done;
+          },
+        };
+      },
+    },
+  });
+  try {
+    const login = await h.call('login', {
+      provider: 'claude',
+      method: 'official-cli',
+    });
+    await h.call('cliCancel', {
+      provider: 'claude',
+      loginId: login.value.loginId,
+    });
+    assert.equal(probes, 1);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI terminal controls reject a non-Claude provider', async () => {
+  await home('cli-provider-boundary');
+  const h = host({ io: fakeIo({}).io });
+  try {
+    for (const endpoint of ['cliInput', 'cliRead', 'cliCancel']) {
+      const result = await h.call(endpoint, {
+        provider: 'codex',
+        loginId: 'fixture',
+        data: 'input',
+      });
+      assert.equal(result.ok, false);
+      assert.match(result.error.message, /only available for Claude/);
+    }
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI terminal reports unsuccessful exit without creating an account', async () => {
+  await home('cli-terminal-exit');
+  let finish;
+  const done = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const h = host({
+    io: fakeIo({}).io,
+    subprocess: {
+      async resolveExecutable() {
+        return '/fixture/bin/claude';
+      },
+      spawn() {
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return { text: '2.1.322', lossy: false };
+              },
+            },
+          },
+          async terminate() {},
+          async waitForExit() {},
+        };
+      },
+      spawnTerminal() {
+        return { done, async terminate() {} };
+      },
+    },
+  });
+  try {
+    const login = (
+      await h.call('login', { provider: 'claude', method: 'official-cli' })
+    ).value;
+    finish({ exitCode: 1, signal: null });
+    await done;
+    const read = await h.call('cliRead', {
+      provider: 'claude',
+      loginId: login.loginId,
+    });
+    assert.equal(read.value.state, 'failed');
+    assert.deepEqual(
+      (await h.call('status')).value.providers.claude.accounts,
+      [],
+    );
+    assert.equal(
+      (
+        await h.call('cliInput', {
+          provider: 'claude',
+          loginId: login.loginId,
+          data: 'late',
+        })
+      ).ok,
+      false,
+    );
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Concurrent Official CLI login requests allocate only one terminal', async () => {
+  await home('cli-concurrent-login');
+  let resolvePath;
+  const pathReady = new Promise((resolve) => {
+    resolvePath = resolve;
+  });
+  let terminals = 0;
+  const h = host({
+    io: fakeIo({}).io,
+    subprocess: {
+      async resolveExecutable() {
+        await pathReady;
+        return '/fixture/bin/claude';
+      },
+      spawn() {
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return { text: '2.1.322', lossy: false };
+              },
+            },
+          },
+          async terminate() {},
+          async waitForExit() {},
+        };
+      },
+      spawnTerminal() {
+        terminals++;
+        return { done: new Promise(() => {}), async terminate() {} };
+      },
+    },
+  });
+  try {
+    const first = h.call('login', {
+      provider: 'claude',
+      method: 'official-cli',
+    });
+    const second = h.call('login', {
+      provider: 'claude',
+      method: 'official-cli',
+    });
+    resolvePath();
+    const results = await Promise.all([first, second]);
+    assert.equal(results.filter((result) => result.ok).length, 1);
+    assert.equal(terminals, 1);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI terminal exposes bounded output only for its current login', async () => {
+  await home('cli-terminal-output');
+  const { PassThrough } = await import('node:stream');
+  const output = new PassThrough();
+  const h = host({
+    io: fakeIo({}).io,
+    subprocess: {
+      async resolveExecutable() {
+        return '/fixture/bin/claude';
+      },
+      spawn() {
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return { text: '2.1.322', lossy: false };
+              },
+            },
+          },
+          async terminate() {},
+          async waitForExit() {},
+        };
+      },
+      spawnTerminal() {
+        return {
+          output,
+          done: new Promise(() => {}),
+          async write() {},
+          async terminate() {
+            output.end();
+          },
+        };
+      },
+    },
+  });
+  try {
+    const login = (
+      await h.call('login', { provider: 'claude', method: 'official-cli' })
+    ).value;
+    output.write('Open the login URL\r\n');
+    const read = await h.call('cliRead', {
+      provider: 'claude',
+      loginId: login.loginId,
+    });
+    assert.equal(read.value.output, 'Open the login URL\r\n');
+    output.write('x'.repeat(70000));
+    const bounded = await h.call('cliRead', {
+      provider: 'claude',
+      loginId: login.loginId,
+    });
+    assert.ok(bounded.value.output.length <= 65536);
+    assert.equal(bounded.value.truncated, true);
+    assert.equal(
+      (await h.call('cliRead', { provider: 'claude', loginId: 'stale' })).ok,
+      false,
+    );
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI terminal accepts input only for its current login and cancels cleanly', async () => {
+  await home('cli-terminal-input');
+  const written = [];
+  let stopped = 0;
+  const h = host({
+    io: fakeIo({}).io,
+    subprocess: {
+      async resolveExecutable() {
+        return '/fixture/bin/claude';
+      },
+      spawn() {
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return { text: '2.1.322', lossy: false };
+              },
+            },
+          },
+          async terminate() {},
+          async waitForExit() {},
+        };
+      },
+      spawnTerminal() {
+        return {
+          done: new Promise(() => {}),
+          async write(data) {
+            written.push(data);
+          },
+          async terminate() {
+            stopped++;
+          },
+        };
+      },
+    },
+  });
+  try {
+    const login = (
+      await h.call('login', { provider: 'claude', method: 'official-cli' })
+    ).value;
+    assert.equal(
+      (
+        await h.call('cliInput', {
+          provider: 'claude',
+          loginId: 'stale',
+          data: 'no',
+        })
+      ).ok,
+      false,
+    );
+    assert.equal(
+      (
+        await h.call('cliInput', {
+          provider: 'claude',
+          loginId: login.loginId,
+          data: 'yes\r',
+        })
+      ).ok,
+      true,
+    );
+    assert.deepEqual(written, ['yes\r']);
+    assert.equal(
+      (
+        await h.call('cliCancel', {
+          provider: 'claude',
+          loginId: login.loginId,
+        })
+      ).ok,
+      true,
+    );
+    assert.equal(stopped, 1);
+    assert.equal(
+      (
+        await h.call('cliInput', {
+          provider: 'claude',
+          loginId: login.loginId,
+          data: 'late',
+        })
+      ).ok,
+      false,
+    );
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI login starts its own PTY in a unique owned account directory', async () => {
+  const root = await home('cli-terminal');
+  const { io, state } = fakeIo({});
+  let terminalRequest;
+  const h = host({
+    io,
+    subprocess: {
+      async resolveExecutable() {
+        return '/fixture/bin/claude';
+      },
+      spawn() {
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return { text: '2.1.322', lossy: false };
+              },
+            },
+          },
+          async terminate() {},
+          async waitForExit() {},
+        };
+      },
+      spawnTerminal(request) {
+        terminalRequest = request;
+        return { async terminate() {}, done: new Promise(() => {}) };
+      },
+    },
+  });
+  try {
+    const result = await h.call('login', {
+      provider: 'claude',
+      method: 'official-cli',
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.value.state, 'authenticating');
+    assert.match(result.value.loginId, /^[a-f0-9-]{36}$/);
+    assert.deepEqual(terminalRequest.argv, [
+      '/fixture/bin/claude',
+      'auth',
+      'login',
+    ]);
+    assert.ok(terminalRequest.cwd.startsWith(root));
+    assert.equal(terminalRequest.env.CLAUDE_CONFIG_DIR, terminalRequest.cwd);
+    assert.ok(terminalRequest.cwd.endsWith(result.value.loginId));
+    const { stat, readdir } = await import('node:fs/promises');
+    const { resolve } = await import('node:path');
+    const settings = resolve(terminalRequest.cwd, '..', '..', 'settings');
+    assert.equal((await stat(settings)).isDirectory(), true);
+    assert.deepEqual(await readdir(settings), []);
+    assert.equal(state.reads, 0);
+    assert.deepEqual(
+      (await h.call('status')).value.providers.claude.accounts,
+      [],
+    );
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI login with no installed CLI offers installation and never imports the default login', async () => {
+  await home('cli-login-missing');
+  const { io, state } = fakeIo({ keychain: blob() });
+  const h = host({
+    io,
+    subprocess: {
+      async resolveExecutable() {
+        throw Object.assign(new Error('absent'), {
+          code: 'SUBPROCESS_EXECUTABLE_NOT_FOUND',
+        });
+      },
+    },
+  });
+  try {
+    const result = await h.call('login', {
+      provider: 'claude',
+      method: 'official-cli',
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.value.available, false);
+    assert.ok(result.value.installCommand);
+    assert.equal(state.reads, 0);
+    assert.deepEqual(
+      (await h.call('status')).value.providers.claude.accounts,
+      [],
+    );
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI discovery rejects failed version output and awaits process cleanup', async () => {
+  await home('cli-version-failure');
+  let terminated = false;
+  let quiescent = false;
+  const h = host({
+    io: fakeIo({}).io,
+    subprocess: {
+      async resolveExecutable() {
+        return '/fixture/bin/claude';
+      },
+      spawn() {
+        return {
+          done: Promise.resolve({ exitCode: 1, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return { text: '2.1.322', lossy: false };
+              },
+            },
+          },
+          async terminate() {
+            terminated = true;
+          },
+          async waitForExit() {
+            quiescent = true;
+          },
+        };
+      },
+    },
+  });
+  try {
+    const result = await h.call('cliDiscover', { provider: 'claude' });
+    assert.equal(result.ok, false);
+    assert.equal(terminated, true);
+    assert.equal(quiescent, true);
+    assert.deepEqual(
+      (await h.call('status')).value.providers.claude.accounts,
+      [],
+    );
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI discovery returns the executable version without default-store access', async () => {
+  const root = await home('cli-version');
+  const { io, state } = fakeIo({});
+  const requests = [];
+  const h = host({
+    io,
+    subprocess: {
+      async resolveExecutable() {
+        return '/fixture/bin/claude';
+      },
+      spawn(request) {
+        requests.push(request);
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: {
+              readFrom() {
+                return { text: '2.1.322 (Claude Code)\n', lossy: false };
+              },
+            },
+          },
+          async terminate() {},
+          async waitForExit() {},
+        };
+      },
+    },
+  });
+  try {
+    const result = await h.call('cliDiscover', { provider: 'claude' });
+    assert.equal(result.value.path, '/fixture/bin/claude');
+    assert.equal(result.value.version, '2.1.322');
+    assert.deepEqual(requests[0].argv, ['/fixture/bin/claude', '--version']);
+    assert.ok(requests[0].cwd.startsWith(root));
+    assert.ok(requests[0].env.CLAUDE_CONFIG_DIR.startsWith(root));
+    assert.equal(requests[0].env.ANTHROPIC_API_KEY, undefined);
+    assert.equal(state.reads, 0);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Official CLI discovery reports a missing executable without reading credentials or creating an account', async () => {
+  await home('missing-cli');
+  const { io, state } = fakeIo({});
+  const h = host({
+    io,
+    subprocess: {
+      async resolveExecutable(name) {
+        assert.equal(name, 'claude');
+        throw Object.assign(new Error('fixture executable absent'), {
+          code: 'SUBPROCESS_EXECUTABLE_NOT_FOUND',
+        });
+      },
+    },
+  });
+  try {
+    const result = await h.call('cliDiscover', { provider: 'claude' });
+    assert.equal(result.value.available, false);
+    assert.ok(result.value.installCommand.length > 0);
+    assert.deepEqual(
+      (await h.call('status')).value.providers.claude.accounts,
+      [],
+    );
+    assert.equal(state.reads, 0);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Claude declares Official CLI as its default access method through assembled status', async () => {
+  await home('access-methods');
+  const h = host({ io: fakeIo({}).io });
+  try {
+    const result = await h.call('status');
+    const capabilities = result.value.providers.claude.capabilities;
+    assert.equal(capabilities.defaultAccessMethod, 'official-cli');
+    assert.deepEqual(
+      capabilities.accessMethods.map((method) => method.id),
+      ['official-cli', 'direct'],
+    );
+    for (const method of capabilities.accessMethods) {
+      assert.ok(['info', 'danger'].includes(method.warning.level));
+      assert.match(method.warning.source, /^https:\/\//);
+      assert.match(method.warning.lastReviewed, /^\d{4}-\d{2}-\d{2}$/);
+      assert.ok(method.warning.text.length > 0);
+    }
+  } finally {
+    await h.dispose();
+  }
+});
 
 test('Claude OAuth parameters match what Claude Code sends (literals on purpose)', () => {
   assert.equal(CLAUDE_AUTHORIZE_URL, 'https://claude.ai/oauth/authorize');
@@ -706,7 +1630,7 @@ test('RPC payloads are validated: provider, method and cache lifetime enums, Cod
     await rejected(
       'login',
       { provider: 'claude', method: 'password' },
-      /payload\.method must be "oauth" or "keychain"/,
+      /payload\.method must be "oauth", "keychain" or "official-cli"/,
     );
     await rejected(
       'login',
