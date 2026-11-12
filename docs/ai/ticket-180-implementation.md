@@ -34,3 +34,25 @@ Owner also approved an interactive login terminal embedded in Subscriptions, usi
 Sources: https://code.claude.com/docs/en/authentication and https://code.claude.com/docs/en/troubleshoot-install . No real CLI, Keychain or account store was accessed.
 
 Documentation lookup initially failed because the default npm cache is not writable; retry uses a workspace-local cache without altering the user's npm state.
+
+## Final verification and review (2026-11-12)
+
+The Owner confirmed the final gate. The canonical build, `npm run quality` (format, lint, typecheck) and the full `npm test` pass, and `npm run check:build` confirms the committed output matches a fresh build. The first full run exposed expectations the change legitimately altered (route counts 45 to 53, the login `method` enum message, Claude add-flow fixtures that must now select Direct sign-in because Official CLI is preselected) and one real regression: `subprocess` had been declared as a hard dependency, which stopped the whole component mounting without it. It is now resolved lazily, so only Official CLI operations report its absence.
+
+Independent Standards and Spec reviews ran against the recorded base `ab74e6d` (read-only subagents, default model route). Applied after review, each observed red before green where testable:
+
+- The signed-in identity now reaches the account card (`account`, `plan`); the Spec review found it was not rendered.
+- A corrupt or partly invalid `accounts.json` skips entries instead of breaking Claude `status` for Direct accounts.
+- A cancel that arrives while the metadata file is staged no longer publishes the account.
+- One scrubbed-environment constant and one storage helper replace repeated literals.
+- The card stops polling after a failed or finished attempt, drops the terminal and reports the error when the host lost the attempt, and no longer spreads a stale closure.
+- The duplicated warning markup is one helper; legacy accounts without a stored method are covered by a test showing Direct sign-in and its warning.
+
+Known residuals, deliberately not fixed here:
+
+- A failed or cancelled attempt leaves `accounts/<id>/` (and possibly a directory-keyed Keychain entry) with no record. Deleting the directory without the CLI's own logout would orphan the Keychain entry, so cleanup belongs with #187's logout-then-delete.
+- `accounts.json` is read-modify-written without a lock; fine for one login at a time, to revisit when #187 deletes concurrently.
+- The stored `cliPath` is display metadata only; session tickets must resolve the executable again and never run it from metadata.
+- The login terminal's environment sets only `CLAUDE_CONFIG_DIR`. The subprocess provider scrubs ambient credentials for children, but no test proves it for the PTY; #182 owns the API-key-variable guarantee and its test.
+- The warning appears beside the login action before it is used; there is no separate confirm dialog.
+- Host tests drive a fake executable over pipes, not a PTY. Live sign-in, real PTY rendering, Keychain behaviour and the installed app are not verified.

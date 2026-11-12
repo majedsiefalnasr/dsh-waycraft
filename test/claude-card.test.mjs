@@ -300,6 +300,71 @@ test('Claude account cards identify the stored access method', async () => {
   }
 });
 
+test('Claude drops the terminal and reports the error when the attempt is gone on the host', async () => {
+  const page = fixture(
+    'en',
+    {
+      busy: false,
+      accounts: [],
+      capabilities: { defaultAccessMethod: 'official-cli', accessMethods: [] },
+    },
+    async (endpoint) =>
+      endpoint === 'login'
+        ? { ok: true, value: { loginId: 'gone-login' } }
+        : endpoint === 'cliRead'
+          ? { ok: false, error: { message: 'Claude CLI login is not active' } }
+          : undefined,
+  );
+  try {
+    page.render();
+    await page.settle();
+    page.click('login');
+    await page.settle();
+    page.render();
+    assert.equal(
+      page.nodes().some((node) => node.props['data-waycraft-cli-terminal']),
+      false,
+    );
+    assert.ok(page.text().includes('Claude CLI login is not active'));
+  } finally {
+    page.unmount();
+  }
+});
+
+test('A legacy account without a stored access method shows Direct sign-in and its warning', async () => {
+  const warning = (level, text) => ({
+    level,
+    text,
+    source: 'https://code.claude.com/docs/en/legal-and-compliance',
+    lastReviewed: '2026-11-11',
+  });
+  const page = fixture('en', {
+    busy: false,
+    accounts: [{ key: 'legacy', account: 'legacy@example.test', plan: 'pro' }],
+    capabilities: {
+      defaultAccessMethod: 'official-cli',
+      accessMethods: [
+        {
+          id: 'official-cli',
+          warning: warning('info', 'claudeOfficialCliWarning'),
+        },
+        { id: 'direct', warning: warning('danger', 'claudeDirectWarning') },
+      ],
+    },
+  });
+  try {
+    page.render();
+    await page.settle();
+    const card = page.text();
+    assert.ok(card.includes(page.dictionary.directSignIn));
+    assert.ok(card.includes(page.dictionary.claudeDirectWarning));
+    assert.ok(card.includes(page.dictionary.warningDanger));
+    assert.ok(card.includes('legacy@example.test'));
+  } finally {
+    page.unmount();
+  }
+});
+
 test('Claude reports a failed CLI login without discarding its terminal output', async () => {
   const page = fixture(
     'en',

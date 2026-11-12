@@ -46,33 +46,46 @@ export function createClaudeCard(
     const [cliInstallation, setCliInstallation] = React.useState(null);
     const [terminalInput, setTerminalInput] = React.useState('');
     React.useEffect(() => {
-      if (!login?.loginId) return;
+      const loginId = login?.loginId;
+      if (!loginId) return;
       let cancelled = false;
       let reading = false;
+      let timer: any;
       const read = async () => {
         if (reading) return;
         reading = true;
         try {
-          const value = await call('cliRead', { loginId: login.loginId });
+          const value = await call('cliRead', { loginId });
           if (cancelled || !alive.current) return;
-          setLogin({ ...login, ...value });
+          setLogin((previous: any) =>
+            previous?.loginId === loginId
+              ? { ...previous, ...value }
+              : previous,
+          );
+          // A failed sign-in keeps its output on screen until the Owner cancels it; nothing more changes.
+          if (value.state === 'failed') clearInterval(timer);
           if (value.state === 'authenticated') {
-            await call('cliCancel', { loginId: login.loginId });
+            clearInterval(timer);
+            await call('cliCancel', { loginId });
             if (cancelled || !alive.current) return;
             setLogin(null);
             await refreshStatus();
           }
         } catch (failure) {
-          if (!cancelled && alive.current)
+          // The host no longer has this attempt (cancelled elsewhere or the component was disabled).
+          clearInterval(timer);
+          if (!cancelled && alive.current) {
+            setLogin(null);
             setError(
               failure instanceof Error ? failure.message : String(failure),
             );
+          }
         } finally {
           reading = false;
         }
       };
       void read();
-      const timer = setInterval(() => {
+      timer = setInterval(() => {
         void read();
       }, 500);
       return () => {
@@ -228,6 +241,34 @@ export function createClaudeCard(
         label,
       );
     const date = (time: number) => new Date(time).toLocaleString();
+    // One access-method warning: level, text, source link and last-reviewed date.
+    const warning = (method: any, tag: string, dataAttribute: string) =>
+      h(
+        tag,
+        {
+          key: method.id,
+          role: 'note',
+          style: styles.statusLine,
+          [dataAttribute]: method.warning.level,
+        },
+        h('strong', null, t(WARNING_LEVEL_KEYS[method.warning.level])),
+        ': ',
+        t(method.warning.text),
+        ' ',
+        h(
+          'a',
+          {
+            href: method.warning.source,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+          },
+          t('warningSource'),
+        ),
+        ' ',
+        t('warningReviewed'),
+        ' ',
+        method.warning.lastReviewed,
+      );
     const part = (name: string, style: any, ...children: any[]) =>
       h('div', { style, 'data-waycraft-claude-part': name }, ...children);
     // `method` is 'oauth' (browser authorization) or 'keychain' (import Claude Code); omitted tries the import first.
@@ -466,36 +507,7 @@ export function createClaudeCard(
                     method.id === (account.accessMethod ?? 'direct'),
                 )
                 .map((method: any) =>
-                  h(
-                    'span',
-                    {
-                      key: method.id,
-                      role: 'note',
-                      style: styles.statusLine,
-                      'data-waycraft-account-warning': method.warning.level,
-                    },
-                    h(
-                      'strong',
-                      null,
-                      t(WARNING_LEVEL_KEYS[method.warning.level]),
-                    ),
-                    ': ',
-                    t(method.warning.text),
-                    ' ',
-                    h(
-                      'a',
-                      {
-                        href: method.warning.source,
-                        target: '_blank',
-                        rel: 'noopener noreferrer',
-                      },
-                      t('warningSource'),
-                    ),
-                    ' ',
-                    t('warningReviewed'),
-                    ' ',
-                    method.warning.lastReviewed,
-                  ),
+                  warning(method, 'span', 'data-waycraft-account-warning'),
                 ),
               account.plan
                 ? h('bdi', { style: styles.usagePlan }, account.plan)
@@ -775,36 +787,7 @@ export function createClaudeCard(
                   (accessMethod ?? status.capabilities.defaultAccessMethod),
               )
               .map((method: any) =>
-                h(
-                  'div',
-                  {
-                    key: method.id,
-                    role: 'note',
-                    'data-waycraft-access-warning': method.warning.level,
-                    style: styles.statusLine,
-                  },
-                  h(
-                    'strong',
-                    null,
-                    t(WARNING_LEVEL_KEYS[method.warning.level]),
-                  ),
-                  ': ',
-                  t(method.warning.text),
-                  ' ',
-                  h(
-                    'a',
-                    {
-                      href: method.warning.source,
-                      target: '_blank',
-                      rel: 'noopener noreferrer',
-                    },
-                    t('warningSource'),
-                  ),
-                  ' ',
-                  t('warningReviewed'),
-                  ' ',
-                  method.warning.lastReviewed,
-                ),
+                warning(method, 'div', 'data-waycraft-access-warning'),
               )
           : null,
         presentation !== 'group' && !busy && hasAccounts && !officialCli

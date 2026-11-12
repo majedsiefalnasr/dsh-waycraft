@@ -1,6 +1,18 @@
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths';
+/** Waycraft-owned storage for the Claude Official CLI: account directories, Provider settings and metadata. */
+const claudeStorage = (...parts) => dshHomePath('plugins', 'waycraft', 'subscriptions', 'claude', ...parts);
+const accountsFile = () => claudeStorage('accounts.json');
+/** Credential- and endpoint-selecting variables removed from every CLI child run for an account. */
+const SCRUBBED_ENV = {
+    ANTHROPIC_API_KEY: undefined,
+    ANTHROPIC_AUTH_TOKEN: undefined,
+    CLAUDE_CODE_OAUTH_TOKEN: undefined,
+    ANTHROPIC_BASE_URL: undefined,
+    CLAUDE_CODE_USE_BEDROCK: undefined,
+    CLAUDE_CODE_USE_VERTEX: undefined,
+};
 export class ClaudeCliLogin {
     terminal;
     loginId;
@@ -18,37 +30,42 @@ export class ClaudeCliLogin {
             this.truncated = true;
         }
     };
+    /**
+     * Official CLI accounts from Waycraft's metadata. A missing or unreadable file and any invalid entry are skipped,
+     * so a damaged file never breaks the Claude status that also lists Direct accounts.
+     */
     async accounts() {
-        const metadataPath = dshHomePath('plugins', 'waycraft', 'subscriptions', 'claude', 'accounts.json');
         let metadata;
         try {
-            metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+            metadata = JSON.parse(await readFile(accountsFile(), 'utf8'));
         }
-        catch (error) {
-            if (error.code === 'ENOENT')
-                return [];
-            throw error;
+        catch {
+            return [];
         }
-        if (!metadata.accounts ||
-            typeof metadata.accounts !== 'object' ||
-            Array.isArray(metadata.accounts))
-            throw new Error('Invalid Claude CLI account metadata');
-        return Object.entries(metadata.accounts).map(([key, account]) => {
+        const entries = metadata?.accounts;
+        if (!entries || typeof entries !== 'object' || Array.isArray(entries))
+            return [];
+        const text = (value) => typeof value === 'string' ? value : undefined;
+        return Object.entries(entries).flatMap(([key, value]) => {
+            const account = value;
             if (!/^[a-f0-9-]{36}$/.test(key) ||
-                account.accessMethod !== 'official-cli')
-                throw new Error('Invalid Claude CLI account metadata');
-            return {
-                key,
-                accessMethod: 'official-cli',
-                cliPath: typeof account.cliPath === 'string' ? account.cliPath : undefined,
-                cliVersion: typeof account.cliVersion === 'string'
-                    ? account.cliVersion
-                    : undefined,
-                emailAddress: typeof account.email === 'string' ? account.email : undefined,
-                subscriptionType: typeof account.subscriptionType === 'string'
-                    ? account.subscriptionType
-                    : undefined,
-            };
+                account?.accessMethod !== 'official-cli')
+                return [];
+            const email = text(account.email);
+            const plan = text(account.subscriptionType);
+            return [
+                {
+                    key,
+                    accessMethod: 'official-cli',
+                    cliPath: text(account.cliPath),
+                    cliVersion: text(account.cliVersion),
+                    // The Claude card shows `account` and `plan`; the email and subscription names stay for other consumers.
+                    account: email,
+                    plan,
+                    emailAddress: email,
+                    subscriptionType: plan,
+                },
+            ];
         });
     }
     async read(loginId) {
@@ -87,8 +104,8 @@ export class ClaudeCliLogin {
             if (!discovery.available || !discovery.path)
                 return discovery;
             const loginId = randomUUID();
-            const directory = dshHomePath('plugins', 'waycraft', 'subscriptions', 'claude', 'accounts', loginId);
-            await mkdir(dshHomePath('plugins', 'waycraft', 'subscriptions', 'claude', 'settings'), {
+            const directory = claudeStorage('accounts', loginId);
+            await mkdir(claudeStorage('settings'), {
                 recursive: true,
                 mode: 0o700,
             });
@@ -139,12 +156,7 @@ export class ClaudeCliLogin {
             const handle = runtime.spawn({
                 argv: [path, 'auth', 'status', '--json'],
                 cwd: directory,
-                env: {
-                    CLAUDE_CONFIG_DIR: directory,
-                    ANTHROPIC_API_KEY: undefined,
-                    ANTHROPIC_AUTH_TOKEN: undefined,
-                    CLAUDE_CODE_OAUTH_TOKEN: undefined,
-                },
+                env: { CLAUDE_CONFIG_DIR: directory, ...SCRUBBED_ENV },
                 stdio: {
                     stdin: 'ignore',
                     stdout: { maxBytes: 16384 },
@@ -172,7 +184,7 @@ export class ClaudeCliLogin {
                         ? { subscriptionType: status.subscriptionType }
                         : {}),
                 };
-                const metadataPath = dshHomePath('plugins', 'waycraft', 'subscriptions', 'claude', 'accounts.json');
+                const metadataPath = accountsFile();
                 let metadata;
                 try {
                     metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
@@ -201,6 +213,9 @@ export class ClaudeCliLogin {
                         mode: 0o600,
                         flag: 'wx',
                     });
+                    // A cancel that arrived while the file was staged must not publish the account.
+                    if (this.loginId !== loginId || this.disposed)
+                        return;
                     await rename(temporary, metadataPath);
                 }
                 finally {
@@ -229,7 +244,6 @@ export class ClaudeCliLogin {
         this.terminal?.output?.off('data', this.onOutput);
         this.output = '';
         this.terminal = undefined;
-        this.loginId = undefined;
         await this.verification;
     }
 }
@@ -248,21 +262,13 @@ export async function discoverClaudeCli(runtime) {
             source: 'https://code.claude.com/docs/en/setup',
         };
     }
-    const directory = dshHomePath('plugins', 'waycraft', 'subscriptions', 'claude', 'probe');
+    const directory = claudeStorage('probe');
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const signal = AbortSignal.timeout(10_000);
     const handle = runtime.spawn({
         argv: [path, '--version'],
         cwd: directory,
-        env: {
-            CLAUDE_CONFIG_DIR: directory,
-            ANTHROPIC_API_KEY: undefined,
-            ANTHROPIC_AUTH_TOKEN: undefined,
-            CLAUDE_CODE_OAUTH_TOKEN: undefined,
-            ANTHROPIC_BASE_URL: undefined,
-            CLAUDE_CODE_USE_BEDROCK: undefined,
-            CLAUDE_CODE_USE_VERTEX: undefined,
-        },
+        env: { CLAUDE_CONFIG_DIR: directory, ...SCRUBBED_ENV },
         stdio: {
             stdin: 'ignore',
             stdout: { maxBytes: 4096 },

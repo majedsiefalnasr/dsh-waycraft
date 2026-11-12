@@ -10955,33 +10955,41 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 		const [cliInstallation, setCliInstallation] = React.useState(null);
 		const [terminalInput, setTerminalInput] = React.useState("");
 		React.useEffect(() => {
-			if (!login?.loginId) return;
+			const loginId = login?.loginId;
+			if (!loginId) return;
 			let cancelled = false;
 			let reading = false;
+			let timer;
 			const read = async () => {
 				if (reading) return;
 				reading = true;
 				try {
-					const value = await call("cliRead", { loginId: login.loginId });
+					const value = await call("cliRead", { loginId });
 					if (cancelled || !alive.current) return;
-					setLogin({
-						...login,
+					setLogin((previous) => previous?.loginId === loginId ? {
+						...previous,
 						...value
-					});
+					} : previous);
+					if (value.state === "failed") clearInterval(timer);
 					if (value.state === "authenticated") {
-						await call("cliCancel", { loginId: login.loginId });
+						clearInterval(timer);
+						await call("cliCancel", { loginId });
 						if (cancelled || !alive.current) return;
 						setLogin(null);
 						await refreshStatus();
 					}
 				} catch (failure) {
-					if (!cancelled && alive.current) setError(failure instanceof Error ? failure.message : String(failure));
+					clearInterval(timer);
+					if (!cancelled && alive.current) {
+						setLogin(null);
+						setError(failure instanceof Error ? failure.message : String(failure));
+					}
 				} finally {
 					reading = false;
 				}
 			};
 			read();
-			const timer = setInterval(() => {
+			timer = setInterval(() => {
 				read();
 			}, 500);
 			return () => {
@@ -11091,6 +11099,16 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 			...props
 		}, label);
 		const date = (time) => new Date(time).toLocaleString();
+		const warning = (method, tag, dataAttribute) => h(tag, {
+			key: method.id,
+			role: "note",
+			style: styles$3.statusLine,
+			[dataAttribute]: method.warning.level
+		}, h("strong", null, t(WARNING_LEVEL_KEYS[method.warning.level])), ": ", t(method.warning.text), " ", h("a", {
+			href: method.warning.source,
+			target: "_blank",
+			rel: "noopener noreferrer"
+		}, t("warningSource")), " ", t("warningReviewed"), " ", method.warning.lastReviewed);
 		const part = (name$1, style, ...children) => h("div", {
 			style,
 			"data-waycraft-claude-part": name$1
@@ -11188,16 +11206,7 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 			}, t(account.accessMethod === "official-cli" ? "officialCli" : "directSignIn")), account.accessMethod === "official-cli" ? h("p", { style: {
 				...styles$3.statusLine,
 				overflowWrap: "anywhere"
-			} }, h("bdi", null, account.cliPath), " ", h("bdi", null, account.cliVersion)) : null, ...(status?.capabilities?.accessMethods ?? []).filter((method) => method.id === (account.accessMethod ?? "direct")).map((method) => h("span", {
-				key: method.id,
-				role: "note",
-				style: styles$3.statusLine,
-				"data-waycraft-account-warning": method.warning.level
-			}, h("strong", null, t(WARNING_LEVEL_KEYS[method.warning.level])), ": ", t(method.warning.text), " ", h("a", {
-				href: method.warning.source,
-				target: "_blank",
-				rel: "noopener noreferrer"
-			}, t("warningSource")), " ", t("warningReviewed"), " ", method.warning.lastReviewed)), account.plan ? h("bdi", { style: styles$3.usagePlan }, account.plan) : null, account.expiresAt ? h("span", { style: styles$3.statusLine }, t("expires"), " ", h("bdi", null, date(account.expiresAt))) : null, button(t("logout"), () => setConfirmation({
+			} }, h("bdi", null, account.cliPath), " ", h("bdi", null, account.cliVersion)) : null, ...(status?.capabilities?.accessMethods ?? []).filter((method) => method.id === (account.accessMethod ?? "direct")).map((method) => warning(method, "span", "data-waycraft-account-warning")), account.plan ? h("bdi", { style: styles$3.usagePlan }, account.plan) : null, account.expiresAt ? h("span", { style: styles$3.statusLine }, t("expires"), " ", h("bdi", null, date(account.expiresAt))) : null, button(t("logout"), () => setConfirmation({
 				account: account.key,
 				label: account.account
 			}), account.accessMethod === "official-cli", {
@@ -11291,16 +11300,7 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 			href: cliInstallation.source,
 			target: "_blank",
 			rel: "noopener noreferrer"
-		}, t("warningSource"))) : null, !busy && status?.capabilities ? status.capabilities.accessMethods.filter((method) => method.id === (accessMethod ?? status.capabilities.defaultAccessMethod)).map((method) => h("div", {
-			key: method.id,
-			role: "note",
-			"data-waycraft-access-warning": method.warning.level,
-			style: styles$3.statusLine
-		}, h("strong", null, t(WARNING_LEVEL_KEYS[method.warning.level])), ": ", t(method.warning.text), " ", h("a", {
-			href: method.warning.source,
-			target: "_blank",
-			rel: "noopener noreferrer"
-		}, t("warningSource")), " ", t("warningReviewed"), " ", method.warning.lastReviewed)) : null, presentation !== "group" && !busy && hasAccounts && !officialCli ? h("p", { style: styles$3.statusLine }, t("claudeAddAccountHint")) : null, busy ? h("div", null, (status.pendingAuth ?? login)?.authorizeUrl ? h("a", {
+		}, t("warningSource"))) : null, !busy && status?.capabilities ? status.capabilities.accessMethods.filter((method) => method.id === (accessMethod ?? status.capabilities.defaultAccessMethod)).map((method) => warning(method, "div", "data-waycraft-access-warning")) : null, presentation !== "group" && !busy && hasAccounts && !officialCli ? h("p", { style: styles$3.statusLine }, t("claudeAddAccountHint")) : null, busy ? h("div", null, (status.pendingAuth ?? login)?.authorizeUrl ? h("a", {
 			href: (status.pendingAuth ?? login).authorizeUrl,
 			target: "_blank",
 			rel: "noopener noreferrer",

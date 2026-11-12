@@ -393,6 +393,9 @@ test('Official CLI discovery executes a fake executable through assembled RPC', 
     assert.ok(account);
     assert.equal(account.cliPath, executable);
     assert.equal(account.cliVersion, '2.1.322');
+    // The existing card renders `account` and `plan`, so the signed-in identity reaches it without a new field.
+    assert.equal(account.account, 'executable@example.test');
+    assert.equal(account.plan, 'max');
   } finally {
     await h.dispose();
   }
@@ -600,6 +603,47 @@ test('Cancelling a CLI terminal never starts identity verification when terminat
       loginId: login.value.loginId,
     });
     assert.equal(probes, 1);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('A corrupt or partly invalid Official CLI account file degrades without breaking status', async () => {
+  const root = await home('cli-corrupt-metadata');
+  const { mkdir } = await import('node:fs/promises');
+  const directory = join(
+    root,
+    'plugins',
+    'waycraft',
+    'subscriptions',
+    'claude',
+  );
+  await mkdir(directory, { recursive: true });
+  const file = join(directory, 'accounts.json');
+  const valid = '0123abcd-0123-4abc-8abc-0123456789ab';
+  const h = host({ io: fakeIo({}).io });
+  try {
+    await writeFile(file, '{ not json');
+    let status = await h.call('status');
+    assert.equal(status.ok, true);
+    assert.deepEqual(status.value.providers.claude.accounts, []);
+    await writeFile(
+      file,
+      JSON.stringify({
+        accounts: {
+          [valid]: { accessMethod: 'official-cli', email: 'ok@example.test' },
+          'not-a-uuid': { accessMethod: 'official-cli' },
+          '1123abcd-0123-4abc-8abc-0123456789ab': null,
+          '2123abcd-0123-4abc-8abc-0123456789ab': { accessMethod: 'direct' },
+        },
+      }),
+    );
+    status = await h.call('status');
+    assert.equal(status.ok, true);
+    assert.deepEqual(
+      status.value.providers.claude.accounts.map((account) => account.key),
+      [valid],
+    );
   } finally {
     await h.dispose();
   }
