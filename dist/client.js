@@ -7051,6 +7051,10 @@ var subscriptions$1 = {
 	"warningSource": "Source",
 	"warningReviewed": "Last reviewed:",
 	"claudeOfficialCliWarning": "Official CLI uses Claude Code's own sign-in and login storage. Provider terms and subscription limits still apply.",
+	"extraUsageTitle": "Claude refused this request",
+	"extraUsageExplanation": "Anthropic now bills requests from third-party apps to your extra usage instead of your plan limits, so this Direct sign-in account was refused. Nothing was retried and no other account was tried. Add the account through Official CLI to use your plan.",
+	"extraUsageAction": "Add an Official CLI account",
+	"extraUsageDismiss": "Dismiss",
 	"claudeDirectWarning": "Danger: direct sign-in uses subscription credentials outside the official CLI. This may conflict with provider terms and put your account at risk.",
 	"checking": "Checking…",
 	"usageTitle": "Usage",
@@ -7728,6 +7732,10 @@ var subscriptions = {
 	"warningSource": "المصدر",
 	"warningReviewed": "آخر مراجعة:",
 	"claudeOfficialCliWarning": "تستخدم واجهة CLI الرسمية تسجيل الدخول وتخزين بياناته الخاصين بـ Claude Code. تظل شروط المزود وحدود الاشتراك سارية.",
+	"extraUsageTitle": "رفض Claude هذا الطلب",
+	"extraUsageExplanation": "أصبحت Anthropic تحاسب طلبات التطبيقات الخارجية على الاستخدام الإضافي بدل حدود خطتك، لذلك رُفض الطلب على حساب تسجيل الدخول المباشر هذا. لم تُعَد المحاولة ولم يُجرَّب أي حساب آخر. أضف الحساب عبر واجهة CLI الرسمية لتستخدم خطتك.",
+	"extraUsageAction": "إضافة حساب عبر واجهة CLI الرسمية",
+	"extraUsageDismiss": "إغلاق",
 	"claudeDirectWarning": "خطر: يستخدم تسجيل الدخول المباشر بيانات اعتماد الاشتراك خارج واجهة CLI الرسمية. قد يتعارض ذلك مع شروط المزود ويعرّض حسابك للخطر.",
 	"checking": "جارٍ التحقق…",
 	"usageTitle": "الاستخدام",
@@ -10966,7 +10974,7 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 	const Button = primitives$1.Button ?? "button";
 	const Input = primitives$1.Input ?? "input";
 	const DEFAULT_NAME = "Claude (Subscription)";
-	return function ClaudeCard({ presentation, onComplete, onFlowState, onAccountsChange, revision, initialExpanded = false } = {}) {
+	return function ClaudeCard({ presentation, onComplete, onFlowState, onAccountsChange, revision, initialExpanded = false, initialAccessMethod } = {}) {
 		const [expanded, setExpanded] = React.useState(initialExpanded);
 		const initialAuthRevision = React.useRef(null);
 		const [manager, setManager] = React.useState(false);
@@ -10975,7 +10983,7 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 		const [pending, setPending] = React.useState(false);
 		const [login, setLogin] = React.useState(null);
 		const [input, setInput] = React.useState("");
-		const [accessMethod, setAccessMethod] = React.useState(null);
+		const [accessMethod, setAccessMethod] = React.useState(initialAccessMethod ?? null);
 		const [cliInstallation, setCliInstallation] = React.useState(null);
 		const [terminalInput, setTerminalInput] = React.useState("");
 		React.useEffect(() => {
@@ -11162,10 +11170,14 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 		React.useEffect(() => {
 			if (presentation !== "auth") return;
 			onFlowState?.({
-				busy: pending || !!busy,
+				busy: pending || !!busy || !!login?.loginId,
 				cancel: async () => {
 					if (pending) return false;
-					if (busy) {
+					if (login?.loginId) {
+						await call("cliCancel", { loginId: login.loginId });
+						setLogin(null);
+						setTerminalInput("");
+					} else if (busy) {
 						await call("cancel");
 						setLogin(null);
 						await refreshStatus();
@@ -11173,7 +11185,12 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 					return true;
 				}
 			});
-		}, [pending, busy]);
+		}, [
+			presentation,
+			pending,
+			busy,
+			login?.loginId
+		]);
 		const name = status?.displayName || DEFAULT_NAME;
 		const hasAccounts = !!status?.accounts?.length;
 		return h("div", {
@@ -11377,6 +11394,142 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 				await refreshStatus();
 			});
 		}))) : null);
+	};
+}
+
+//#endregion
+//#region src/extra-usage-notice.ts
+/**
+* Session card for Anthropic's extra-usage HTTP 400 on a Direct sign-in Claude account (#181). The host records the
+* refusal per session and answers `extraUsageNotice`; this card turns it into a localised explanation with an action
+* that opens the add-account flow on Official CLI. Independently implemented; no reference source.
+*/
+/** How often the card asks the host whether its session was refused (a cheap in-memory lookup). */
+const POLL_MS = 3e3;
+function createExtraUsageNotice(React, primitives$1, AddAccount) {
+	const h = React.createElement;
+	const Button = primitives$1.Button ?? "button";
+	const Modal = primitives$1.Modal;
+	const styles$7 = {
+		card: {
+			display: "flex",
+			flexDirection: "column",
+			gap: 8,
+			padding: "12px 16px",
+			border: "0.5px solid var(--dsw-alias-border-l2)",
+			borderRadius: "var(--dsw-radius-xl,20px)",
+			background: "var(--dsw-alias-bg-layer-2)",
+			textAlign: "start",
+			minInlineSize: 0
+		},
+		title: {
+			margin: 0,
+			fontSize: 14,
+			lineHeight: "20px",
+			fontWeight: 500
+		},
+		body: {
+			margin: 0,
+			fontSize: 13,
+			lineHeight: "20px",
+			color: "var(--dsw-alias-label-secondary)",
+			overflowWrap: "anywhere"
+		},
+		actions: {
+			display: "flex",
+			flexWrap: "wrap",
+			gap: 8
+		}
+	};
+	return function ExtraUsageNotice({ rpc, sessionId, t }) {
+		const [notice, setNotice] = React.useState(null);
+		const [dismissed, setDismissed] = React.useState(null);
+		const [adding, setAdding] = React.useState(false);
+		const flow = React.useRef(null);
+		const closing = React.useRef(false);
+		const openedSession = React.useRef(sessionId);
+		const [closeError, setCloseError] = React.useState("");
+		const close = async () => {
+			if (closing.current) return;
+			closing.current = true;
+			try {
+				if (flow.current && !await flow.current.cancel()) return;
+				setAdding(false);
+				flow.current = null;
+				setCloseError("");
+			} catch (failure) {
+				setCloseError(failure instanceof Error ? failure.message : String(failure));
+			} finally {
+				closing.current = false;
+			}
+		};
+		React.useEffect(() => {
+			let alive = true;
+			let timer;
+			setNotice(null);
+			setDismissed(null);
+			const read = async () => {
+				try {
+					const answer = await rpc.call("/api", "waycraft-subscriptions.extraUsageNotice", {
+						provider: "claude",
+						sessionId
+					});
+					if (!alive) return;
+					setNotice(answer?.ok === true && answer.value?.active === true ? {
+						sessionId,
+						revision: answer.value.revision
+					} : null);
+				} catch {} finally {
+					if (alive) timer = setTimeout(() => void read(), POLL_MS);
+				}
+			};
+			read();
+			return () => {
+				alive = false;
+				clearTimeout(timer);
+			};
+		}, [sessionId, rpc]);
+		React.useEffect(() => {
+			if (adding) close();
+		}, [sessionId]);
+		const visible = notice?.sessionId === sessionId && notice.revision !== dismissed;
+		if (!visible && !adding) return null;
+		return h("section", {
+			role: "alert",
+			style: styles$7.card,
+			"data-waycraft-extra-usage": true
+		}, visible ? h("h4", { style: styles$7.title }, t("extraUsageTitle")) : null, visible ? h("p", { style: styles$7.body }, t("extraUsageExplanation")) : null, h("div", { style: {
+			...styles$7.actions,
+			display: visible ? "flex" : "none"
+		} }, h(Button, {
+			type: "button",
+			"data-waycraft-extra-usage-action": true,
+			disabled: adding || !Modal,
+			onClick: () => {
+				openedSession.current = sessionId;
+				setAdding(true);
+			}
+		}, t("extraUsageAction")), h(Button, {
+			type: "button",
+			"data-waycraft-extra-usage-dismiss": true,
+			disabled: adding,
+			onClick: () => setDismissed(notice?.revision ?? null)
+		}, t("extraUsageDismiss"))), adding ? h(Modal, {
+			open: true,
+			title: t("extraUsageAction"),
+			closeLabel: t("cancel"),
+			onClose: () => void close()
+		}, closeError ? h("p", { role: "alert" }, closeError) : null, h(AddAccount, {
+			presentation: "auth",
+			initialAccessMethod: "official-cli",
+			onFlowState: (state) => {
+				flow.current = state;
+				if (openedSession.current !== sessionId) close();
+			},
+			onComplete: () => {
+				close();
+			}
+		})) : null);
 	};
 }
 
@@ -13413,6 +13566,7 @@ function applySubscriptions(root) {
 		const GuardedProxy = guarded(React, ProxySettings, "proxy setting");
 		const GuardedSpeed = guarded(React, SpeedSelect, "Speed control");
 		const GuardedBadge = guarded(React, SubscriptionUsageBadge, "usage badge");
+		const ExtraUsageNotice = guarded(React, createExtraUsageNotice(React, primitives$1, ClaudeCard), "extra-usage notice");
 		const listeners = /* @__PURE__ */ new Set();
 		let ApiProviders;
 		const SubscriptionProviders = createApiProviders(React, null, t, primitives$1);
@@ -13666,6 +13820,16 @@ function applySubscriptions(root) {
 						currentModel: createCurrentModelReader(models, sessionId)
 					})
 				}, GuardedBadge)));
+				add(() => ctx.slots.inject("conversation.composer.dock", () => ctx.slots.register({
+					name: "conversation.composer.dock",
+					id: "waycraft-extra-usage-notice",
+					order: 5,
+					locale: NS$1,
+					inject: (sessionId) => ({
+						rpc: connection.rpc,
+						sessionId
+					})
+				}, ExtraUsageNotice)));
 			} else if (!surfaceWanted() && surfacesActive) {
 				surfacesActive = false;
 				for (const off of surfaces.splice(0)) isolate(off);

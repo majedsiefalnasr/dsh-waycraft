@@ -20,6 +20,7 @@ import { ProxySettings } from './settings/ProxySettings.js';
 import { createApiProviders } from './api-providers.js';
 import { createCopilotCard } from './copilot-card.js';
 import { createClaudeCard } from './claude-card.js';
+import { createExtraUsageNotice } from './extra-usage-notice.js';
 import { createAntigravityCard } from './antigravity-card.js';
 import { createZenCard } from './zen-card.js';
 import { createGrokCard } from './grok-card.js';
@@ -122,6 +123,11 @@ export function applySubscriptions(root: Context): void {
           React,
           SubscriptionUsageBadge as any,
           'usage badge',
+        );
+        const ExtraUsageNotice = guarded(
+          React,
+          createExtraUsageNotice(React, primitives, ClaudeCard),
+          'extra-usage notice',
         );
         const listeners = new Set<() => void>();
         let ApiProviders: any;
@@ -506,6 +512,23 @@ export function applySubscriptions(root: Context): void {
                     }),
                   },
                   GuardedBadge,
+                ),
+              ),
+            );
+            add(() =>
+              ctx.slots.inject('conversation.composer.dock', () =>
+                ctx.slots.register(
+                  {
+                    name: 'conversation.composer.dock',
+                    id: 'waycraft-extra-usage-notice',
+                    order: 5,
+                    locale: NS,
+                    inject: (sessionId: string) => ({
+                      rpc: connection.rpc,
+                      sessionId,
+                    }),
+                  },
+                  ExtraUsageNotice,
                 ),
               ),
             );

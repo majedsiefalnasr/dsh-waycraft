@@ -33,6 +33,7 @@ export function createClaudeCard(
     onAccountsChange,
     revision,
     initialExpanded = false,
+    initialAccessMethod,
   }: any = {}) {
     const [expanded, setExpanded] = React.useState(initialExpanded);
     const initialAuthRevision = React.useRef(null as number | null);
@@ -42,7 +43,9 @@ export function createClaudeCard(
     const [pending, setPending] = React.useState(false);
     const [login, setLogin] = React.useState(null);
     const [input, setInput] = React.useState('');
-    const [accessMethod, setAccessMethod] = React.useState(null);
+    const [accessMethod, setAccessMethod] = React.useState(
+      initialAccessMethod ?? null,
+    );
     const [cliInstallation, setCliInstallation] = React.useState(null);
     const [terminalInput, setTerminalInput] = React.useState('');
     React.useEffect(() => {
@@ -311,10 +314,14 @@ export function createClaudeCard(
     React.useEffect(() => {
       if (presentation !== 'auth') return;
       onFlowState?.({
-        busy: pending || !!busy,
+        busy: pending || !!busy || !!login?.loginId,
         cancel: async () => {
           if (pending) return false;
-          if (busy) {
+          if (login?.loginId) {
+            await call('cliCancel', { loginId: login.loginId });
+            setLogin(null);
+            setTerminalInput('');
+          } else if (busy) {
             await call('cancel');
             setLogin(null);
             await refreshStatus();
@@ -322,7 +329,7 @@ export function createClaudeCard(
           return true;
         },
       });
-    }, [pending, busy]);
+    }, [presentation, pending, busy, login?.loginId]);
     const name = status?.displayName || DEFAULT_NAME;
     const hasAccounts = !!status?.accounts?.length;
     return h(

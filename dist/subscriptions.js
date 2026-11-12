@@ -209,6 +209,7 @@ function readLoginMethod(payload, provider) {
 }
 /** Endpoints that serve Claude; every other endpoint (speed, reset, proxy, image, video) stays Codex-only. */
 const CLAUDE_ENDPOINTS = new Set([
+    'extraUsageNotice',
     'cliDiscover',
     'cliInput',
     'cliRead',
@@ -576,7 +577,23 @@ export function apply(ctx, config = {}, options = {}) {
                 maxTokens: 64_000,
             },
         ];
+    const extraUsageSessions = new Map();
+    let extraUsageRevision = 0;
     const claudeAdapter = new ClaudeAdapter({
+        onExtraUsage: (sessionId) => {
+            // Re-insert to retain recency; a revision distinguishes consecutive refusals after dismissal.
+            extraUsageSessions.delete(sessionId);
+            extraUsageSessions.set(sessionId, ++extraUsageRevision);
+            while (extraUsageSessions.size > SPEED_SESSIONS_MAX) {
+                const oldest = extraUsageSessions.keys().next().value;
+                if (oldest === undefined)
+                    break;
+                extraUsageSessions.delete(oldest);
+            }
+        },
+        onTurnAccepted: (sessionId) => {
+            extraUsageSessions.delete(sessionId);
+        },
         tokens: claudeTokens,
         models: claudeModels,
         streamIdleTimeoutMs: 300_000,
@@ -984,6 +1001,7 @@ export function apply(ctx, config = {}, options = {}) {
             'setZenEnabled',
             'image',
             'video',
+            'extraUsageNotice',
             'cliDiscover',
             'cliInput',
             'cliRead',
@@ -1092,6 +1110,16 @@ export function apply(ctx, config = {}, options = {}) {
                                     mediaType: 'video/mp4',
                                     dataBase64: data.toString('base64'),
                                 };
+                                break;
+                            }
+                            case 'extraUsageNotice': {
+                                if (provider !== 'claude')
+                                    throw new Error('The extra-usage notice is only available for Claude');
+                                const revision = extraUsageSessions.get(string('sessionId'));
+                                value =
+                                    revision === undefined
+                                        ? { active: false }
+                                        : { active: true, revision };
                                 break;
                             }
                             case 'cliRead': {

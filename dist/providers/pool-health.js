@@ -10,6 +10,7 @@
  * (the request itself is at fault and another account would fail alike).
  */
 import { CONTEXT_WINDOW_EXCEEDED_CODE, LlmError, QUOTA_EXCEEDED_CODE, } from '@deepseek-ai/dsh-llm';
+import { EXTRA_USAGE_REQUIRED_CODE } from './common.js';
 /** Registry key for one pool member. */
 export function memberKey(provider, account, model) {
     return `${provider}/${account}/${model}`;
@@ -100,6 +101,8 @@ export function classifyPoolFailure(error, provider) {
                 scope: 'member',
             };
         case CONTEXT_WINDOW_EXCEEDED_CODE:
+        // Billing policy of the Direct sign-in route, not of one account: another account would be refused alike.
+        case EXTRA_USAGE_REQUIRED_CODE:
         case 'ABORTED':
         default:
             return { action: 'throw' };

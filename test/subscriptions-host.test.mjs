@@ -72,7 +72,7 @@ function harness() {
 test('Owner can probe the mounted component; unauthenticated calls are rejected', async () => {
   const host = harness();
   apply(host.ctx);
-  assert.equal(host.routes.size, 53);
+  assert.equal(host.routes.size, 55);
   assert.ok(
     host.routes.has('/api/waycraft-subscriptions.zenStatus'),
     'dedicated lazy Zen status route',

@@ -94,8 +94,8 @@ test('disposing the component removes every owned registration and stops owned w
     await settle();
     assert.equal(
       first.routes.size,
-      53,
-      '26 owned routes under both the waycraft prefix and the deprecated legacy prefix, plus the binary videoFile GET route',
+      55,
+      '27 owned routes under both the waycraft prefix and the deprecated legacy prefix, plus the binary videoFile GET route',
     );
     assert.equal(
       first.routes.has('/api/waycraft-subscriptions.setZenEnabled'),
@@ -166,7 +166,7 @@ test('disposing the component removes every owned registration and stops owned w
     // A second mount of the same module works and is independent of the disposed one.
     const second = mount(ctx, {}, false);
     await settle();
-    assert.equal(second.routes.size, 53);
+    assert.equal(second.routes.size, 55);
     assert.equal(
       second.routes.has('/api/waycraft-subscriptions.setZenEnabled'),
       true,
