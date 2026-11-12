@@ -20,7 +20,7 @@ test('registered Claude adapter streams once, resumes on its bound account, and 
   await writeFile(join(root, 'plugins/waycraft/subscriptions/provider-settings.json'), JSON.stringify({ providers: { claude: { accounts: { [`official-cli:${id2}`]: { independentEntry: true } } } }, toolHistory: [] }));
   const executable = join(root, 'fake-claude.mjs');
   await writeFile(executable, `import {appendFileSync} from 'node:fs';
-const args=process.argv.slice(2); if(args.includes('--version')) { console.log('2.1.322'); } else {
+const args=process.argv.slice(2); if(args.includes('--version')) { console.log('2.1.322'); } else if(args.includes('--help')) { console.log('Options:\\n  -p, --print\\n  --input-format <f>\\n  --output-format <f>\\n  --verbose\\n  --include-partial-messages\\n  --model <m>\\n  --session-id <id>\\n  --resume <id>\\n  --system-prompt <p>'); } else {
 let input=''; for await(const chunk of process.stdin) input+=chunk;
 appendFileSync(${JSON.stringify(join(root, 'record.jsonl'))},JSON.stringify({args,env:process.env,input})+'\\n');
 if(args.includes('--resume') && input.includes('missing-session')) { console.log(JSON.stringify({type:'result',is_error:true,result:'No conversation found with session ID: fixture'})); process.exit(1); }

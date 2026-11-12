@@ -752,6 +752,31 @@ export function apply(
       );
     return runtime;
   };
+  // What the account card shows about the installed CLI: its version against the provider minimum. A short cache
+  // keeps repeated status reads from starting a process each time; any failure just means nothing is shown.
+  const CLI_STATUS_TTL_MS = 30_000;
+  let claudeCliProbe:
+    | { at: number; value: Promise<Record<string, unknown> | undefined> }
+    | undefined;
+  const claudeCliStatus = () => {
+    if (claudeCliProbe && Date.now() - claudeCliProbe.at < CLI_STATUS_TTL_MS)
+      return claudeCliProbe.value;
+    const { minimumVersion, updateCommand, source } = CLAUDE_CAPABILITIES.cli;
+    const value = (async () => {
+      const found = await discoverClaudeCli(cliRuntime());
+      return found.version
+        ? {
+            version: found.version,
+            minimumVersion,
+            updateRequired: found.updateRequired === true,
+            updateCommand,
+            source,
+          }
+        : undefined;
+    })().catch(() => undefined);
+    claudeCliProbe = { at: Date.now(), value };
+    return value;
+  };
   const claudeAuth = new ClaudeAuthController(
     flows,
     claudeChanged,
@@ -1687,6 +1712,9 @@ export function apply(
                               claude: {
                                 ...claudeState,
                                 capabilities: CLAUDE_CAPABILITIES,
+                                ...((await claudeCliLogin.accounts()).length
+                                  ? { cli: await claudeCliStatus() }
+                                  : {}),
                                 cliSettings: { cliMaxConcurrent: preferences.get('claude').cliMaxConcurrent ?? 4 },
                                 displayName:
                                   preferences.get('claude').displayName,

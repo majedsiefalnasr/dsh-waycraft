@@ -513,6 +513,29 @@ export function apply(ctx, config = {}, options = {}) {
             throw new Error('Official CLI requires the DSH subprocess service, which is not available in this composition');
         return runtime;
     };
+    // What the account card shows about the installed CLI: its version against the provider minimum. A short cache
+    // keeps repeated status reads from starting a process each time; any failure just means nothing is shown.
+    const CLI_STATUS_TTL_MS = 30_000;
+    let claudeCliProbe;
+    const claudeCliStatus = () => {
+        if (claudeCliProbe && Date.now() - claudeCliProbe.at < CLI_STATUS_TTL_MS)
+            return claudeCliProbe.value;
+        const { minimumVersion, updateCommand, source } = CLAUDE_CAPABILITIES.cli;
+        const value = (async () => {
+            const found = await discoverClaudeCli(cliRuntime());
+            return found.version
+                ? {
+                    version: found.version,
+                    minimumVersion,
+                    updateRequired: found.updateRequired === true,
+                    updateCommand,
+                    source,
+                }
+                : undefined;
+        })().catch(() => undefined);
+        claudeCliProbe = { at: Date.now(), value };
+        return value;
+    };
     const claudeAuth = new ClaudeAuthController(flows, claudeChanged, (error) => browserSafeError(error, 'claude login'), () => readClaudeCodeCredentials(claudeCredsIo), (session) => recordClaudeEmail(session, claudeIdentity, claudeLifecycle.signal));
     const resets = new ResetRedemption(readUsage, async (account, credit, request, signal) => consumeCodexResetCredit(await tokens.session(account), credit, request, proxiedFetch, signal), (account) => usage.invalidate('codex', account));
     adapter = new CodexAdapter({
@@ -1243,6 +1266,9 @@ export function apply(ctx, config = {}, options = {}) {
                                                 claude: {
                                                     ...claudeState,
                                                     capabilities: CLAUDE_CAPABILITIES,
+                                                    ...((await claudeCliLogin.accounts()).length
+                                                        ? { cli: await claudeCliStatus() }
+                                                        : {}),
                                                     cliSettings: { cliMaxConcurrent: preferences.get('claude').cliMaxConcurrent ?? 4 },
                                                     displayName: preferences.get('claude').displayName,
                                                     accounts: [

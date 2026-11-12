@@ -7047,6 +7047,9 @@ var subscriptions$1 = {
 	"officialCli": "Official CLI",
 	"cliApiKeysRemoved": "Provider API-key variables (such as ANTHROPIC_API_KEY) are removed from the CLI's environment, so runs use this account's subscription.",
 	"claudeCliMissing": "Claude Code was not found. Install it yourself, then try again. No account has been created.",
+	"cliUpdateRequired": "Claude Code is older than the minimum version this plugin supports, so no run will start. Update it with the official command below, then try again.",
+	"cliInstalledVersion": "Installed version",
+	"cliMinimumVersion": "Minimum version",
 	"directSignIn": "Direct sign-in",
 	"warningInfo": "Information",
 	"warningDanger": "High risk",
@@ -7730,6 +7733,9 @@ var subscriptions = {
 	"officialCli": "واجهة CLI الرسمية",
 	"cliApiKeysRemoved": "تُزال متغيرات مفاتيح API الخاصة بالمزود (مثل ANTHROPIC_API_KEY) من بيئة CLI، فتعمل الطلبات باشتراك هذا الحساب.",
 	"claudeCliMissing": "لم يُعثر على Claude Code. ثبّته بنفسك ثم أعد المحاولة. لم يُنشأ أي حساب.",
+	"cliUpdateRequired": "إصدار Claude Code أقدم من الحد الأدنى الذي تدعمه هذه الإضافة، لذلك لن يبدأ أي تشغيل. حدّثه بالأمر الرسمي أدناه ثم أعد المحاولة.",
+	"cliInstalledVersion": "الإصدار المثبّت",
+	"cliMinimumVersion": "الحد الأدنى للإصدار",
 	"directSignIn": "تسجيل الدخول المباشر",
 	"warningInfo": "معلومة",
 	"warningDanger": "مخاطر عالية",
@@ -11150,6 +11156,21 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 			"data-waycraft-claude-part": name$1
 		}, ...children);
 		const officialCli = (status?.capabilities ? accessMethod ?? status.capabilities.defaultAccessMethod : void 0) === "official-cli";
+		const updateNotice = (cli, marker) => h("div", {
+			role: "status",
+			style: styles$3.statusLine,
+			[marker]: "true"
+		}, t("cliUpdateRequired"), h("p", null, t("cliInstalledVersion"), " ", h("bdi", null, cli.version), " · ", t("cliMinimumVersion"), " ", h("bdi", null, cli.minimumVersion)), h("pre", {
+			dir: "ltr",
+			style: {
+				whiteSpace: "pre-wrap",
+				overflowWrap: "anywhere"
+			}
+		}, cli.updateCommand), h("a", {
+			href: cli.source,
+			target: "_blank",
+			rel: "noopener noreferrer"
+		}, t("warningSource")));
 		const startLogin = (method) => {
 			action(async () => {
 				const selected = officialCli ? "official-cli" : method;
@@ -11269,7 +11290,7 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 			}, t(account.accessMethod === "official-cli" ? "officialCli" : "directSignIn")), account.accessMethod === "official-cli" ? h("p", { style: {
 				...styles$3.statusLine,
 				overflowWrap: "anywhere"
-			} }, h("bdi", null, account.cliPath), " ", h("bdi", null, account.cliVersion)) : null, account.accessMethod === "official-cli" ? h("span", {
+			} }, h("bdi", null, account.cliPath), " ", h("bdi", null, account.cliVersion)) : null, account.accessMethod === "official-cli" && status?.cli?.updateRequired ? updateNotice(status.cli, "data-waycraft-cli-update") : null, account.accessMethod === "official-cli" ? h("span", {
 				style: styles$3.statusLine,
 				"data-waycraft-account-api-keys-removed": "true"
 			}, t("cliApiKeysRemoved")) : null, ...(status?.capabilities?.accessMethods ?? []).filter((method) => method.id === (account.accessMethod ?? "direct")).map((method) => warning(method, "span", "data-waycraft-account-warning")), account.plan ? h("bdi", { style: styles$3.usagePlan }, account.plan) : null, account.expiresAt ? h("span", { style: styles$3.statusLine }, t("expires"), " ", h("bdi", null, date(account.expiresAt))) : null, button(t("logout"), () => setConfirmation({
@@ -11356,7 +11377,7 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 		})) : null, cliInstallation ? h("div", {
 			role: "status",
 			style: styles$3.statusLine
-		}, t("claudeCliMissing"), h("pre", {
+		}, t(cliInstallation.updateRequired ? "cliUpdateRequired" : "claudeCliMissing"), h("pre", {
 			dir: "ltr",
 			style: {
 				whiteSpace: "pre-wrap",

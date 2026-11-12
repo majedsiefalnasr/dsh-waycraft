@@ -7,7 +7,9 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
-import { discoverClaudeCli, prepareClaudeCliAccountDirectory, SCRUBBED_ENV } from '../auth/claude-cli.js';
+import { claudeCliMissingFlagMessage, claudeCliUpdateMessage, discoverClaudeCli, prepareClaudeCliAccountDirectory, probeClaudeCliFlags, SCRUBBED_ENV } from '../auth/claude-cli.js';
+import { planCliArguments, refusedFlag } from '../auth/cli-flags.js';
+import type { CliArgument } from '../auth/cli-flags.js';
 import type { ClaudeCliRuntime } from '../auth/claude-cli.js';
 import { translateClaudeCliStream } from '../translate/claude-cli.js';
 import {
@@ -779,6 +781,10 @@ export function claudeRequestBody(
 
 /** Claude wire adapter: one instance serves the `claude` provider route. */
 export class ClaudeAdapter extends LlmAdapter {
+  /** `--help` flags per installed executable and version, so a turn does not pay for a probe each time. */
+  private readonly cliFlags = new Map<string, Promise<Set<string> | undefined>>();
+  /** Optional flags an installed CLI refused once: they are not offered to it again. */
+  private readonly cliRefused = new Map<string, Set<string>>();
   private readonly cliOperations = new Set<Promise<void>>();
   private readonly cliAdmission = new Map<string, number>();
   private readonly cliWaiters = new Set<() => void>();
@@ -1063,7 +1069,19 @@ export class ClaudeAdapter extends LlmAdapter {
     const runtime = this.options.cliRuntime?.();
     if (!runtime) throw new Error('Official CLI requires the DSH subprocess service');
     const discovery = await discoverClaudeCli(runtime, options.signal ? AbortSignal.any([options.signal, this.cliQueueAbort.signal]) : this.cliQueueAbort.signal);
+    if (discovery.updateRequired) throw new Error(claudeCliUpdateMessage(discovery.version));
     if (!discovery.available || !discovery.path) throw new Error('Claude CLI is not available');
+    const installed = `${discovery.path}@${discovery.version}`;
+    const refused = this.cliRefused.get(installed) ?? new Set<string>();
+    // One probe per installed version, shared by turns that arrive together. An unreadable help page is remembered
+    // too (nothing is judged in advance and a refused flag is handled at run time); only an aborted probe is retried.
+    let probe = this.cliFlags.get(installed);
+    if (!probe) {
+      probe = probeClaudeCliFlags(runtime, discovery.path, options.signal ? AbortSignal.any([options.signal, this.cliQueueAbort.signal]) : this.cliQueueAbort.signal);
+      this.cliFlags.set(installed, probe);
+      probe.catch(() => { if (this.cliFlags.get(installed) === probe) this.cliFlags.delete(installed); });
+    }
+    const supported = await probe;
     const directory = await prepareClaudeCliAccountDirectory(loginId);
     let prior = options.messages.flatMap((message) => {
       const state = message.role === 'assistant' ? message.source?.replayState : undefined;
@@ -1078,7 +1096,20 @@ export class ClaudeAdapter extends LlmAdapter {
     // A new CLI session has no transcript. Preserve DSH's text history as a
     // single contextual prompt; a resumed session already owns that history.
     const text = prior || options.messages.length === 1 ? messageText(prompt) : options.messages.map((message) => `[${message.role}]\n${messageText(message)}`).join('\n\n');
-    const argv = [discovery.path, ...(options.system ? ['--system-prompt', options.system] : []), '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--model', options.model, ...(prior ? ['--resume', prior] : ['--session-id', randomUUID()])];
+    const parts: CliArgument[] = [
+      ...(options.system ? [{ flag: '--system-prompt', args: ['--system-prompt', options.system] }] : []),
+      { flag: '--print', args: ['-p'] },
+      { flag: '--input-format', args: ['--input-format', 'stream-json'] },
+      { flag: '--output-format', args: ['--output-format', 'stream-json'] },
+      { flag: '--verbose', args: ['--verbose'] },
+      // Without partial events the translator reads the completed messages instead.
+      { flag: '--include-partial-messages', args: ['--include-partial-messages'], optional: true },
+      { flag: '--model', args: ['--model', options.model] },
+      prior ? { flag: '--resume', args: ['--resume', prior] } : { flag: '--session-id', args: ['--session-id', randomUUID()] },
+    ];
+    const plan = planCliArguments(parts, supported, refused);
+    if (plan.missing.length) throw new Error(claudeCliMissingFlagMessage(discovery.version, plan.missing.join(', ')));
+    const argv = [discovery.path, ...plan.argv];
     if (this.disposed) throw new Error('Claude adapter is disposed');
     const controller = new AbortController();
     const caller = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
@@ -1091,6 +1122,8 @@ export class ClaudeAdapter extends LlmAdapter {
     // Observe spawn failures immediately, including while the output iterator is pending.
     void handle.done.catch(() => {});
     let retryMissing = false;
+    let retryWithoutFlag = false;
+    let emitted = false;
     let outputEvidence = "";
     try {
       if (!handle.stdout) throw new Error('Claude CLI subprocess omitted stdout pipe');
@@ -1118,15 +1151,25 @@ export class ClaudeAdapter extends LlmAdapter {
         pending += decoder.end();
         if (pending) yield pending;
       }
-      yield* translateClaudeCliStream(observedLines(), this.options.onWarn);
+      for await (const chunk of translateClaudeCliStream(observedLines(), this.options.onWarn)) { emitted = true; yield chunk; }
       const outcome = await handle.done;
       if (outcome.exitCode !== 0 || outcome.signal) throw new Error('Claude CLI turn failed');
     } catch (error) {
       const stderr = handle.collected?.stderr?.readFrom(0)?.text ?? '';
-      if (prior && !fresh && !signal.aborted && /(?:no (?:conversation|session) found|(?:session|conversation).*(?:not found|does not exist|missing))/i.test(`${outputEvidence} ${stderr}`)) retryMissing = true;
+      // A refusal is the CLI's own startup complaint on stderr, before any output; never model text.
+      const named = signal.aborted || emitted ? undefined : refusedFlag(stderr);
+      // Only a flag this run actually passed can have been refused by it.
+      const rejected = named !== undefined && argv.includes(named) ? parts.find((part) => part.flag === named) : undefined;
+      if (rejected?.optional) {
+        // Remembered before the retry, so one flag is refused at most once and the retry cannot loop.
+        this.cliRefused.set(installed, new Set([...refused, rejected.flag]));
+        retryWithoutFlag = true;
+      } else if (rejected) throw new Error(claudeCliMissingFlagMessage(discovery.version, rejected.flag));
+      else if (prior && !fresh && !signal.aborted && /(?:no (?:conversation|session) found|(?:session|conversation).*(?:not found|does not exist|missing))/i.test(`${outputEvidence} ${stderr}`)) retryMissing = true;
       else throw mapFetchFailure('Claude CLI', error, watchdog, options.signal);
     } finally { watchdog.stop(); try { await handle.terminate(); await turn.closed; } finally { this.cliTurns.delete(turn); } }
-    if (retryMissing) yield* this.runCliAccount(options, loginId, true);
+    if (retryWithoutFlag) yield* this.runCliAccount(options, loginId, fresh);
+    else if (retryMissing) yield* this.runCliAccount(options, loginId, true);
   }
 
   private async *streamCore(

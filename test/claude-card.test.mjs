@@ -869,3 +869,56 @@ test('the card does not render reset-credit controls (Codex only) and Manage ope
   const manager = page.nodes().find((n) => n.tag === 'ManageFixture');
   assert.equal(manager.props.provider, 'claude');
 });
+
+for (const locale of ['en', 'ar']) {
+  test(`Claude card tells the Owner to update an outdated CLI with the official command (${locale})`, async () => {
+    const cli = (version, updateRequired) => ({ version, minimumVersion: '2.0.0', updateRequired, updateCommand: 'claude update', source: 'https://code.claude.com/docs/en/setup' });
+    const status = (state) => ({
+      busy: false,
+      accounts: [{ key: 'cli-account', account: 'fixture@example.test', accessMethod: 'official-cli', cliPath: '/fixture/bin/claude', cliVersion: '1.9.4' }],
+      capabilities: { defaultAccessMethod: 'official-cli', accessMethods: [] },
+      cli: state,
+    });
+    const outdated = fixture(locale, status(cli('1.9.4', true)));
+    try {
+      outdated.render();
+      await outdated.settle();
+      const text = outdated.text();
+      assert.ok(text.includes(outdated.dictionary.cliUpdateRequired));
+      assert.ok(text.includes('claude update'));
+      assert.ok(text.includes('1.9.4') && text.includes('2.0.0'));
+    } finally {
+      outdated.unmount();
+    }
+    const current = fixture(locale, status(cli('2.1.322', false)));
+    try {
+      current.render();
+      await current.settle();
+      assert.equal(current.text().includes(current.dictionary.cliUpdateRequired), false);
+    } finally {
+      current.unmount();
+    }
+  });
+}
+
+test('Claude card explains an outdated CLI instead of reporting it missing when sign-in is refused', async () => {
+  const page = fixture(
+    'en',
+    { busy: false, accounts: [], capabilities: { defaultAccessMethod: 'official-cli', accessMethods: [] } },
+    async (endpoint) =>
+      endpoint === 'login'
+        ? { ok: true, value: { available: false, updateRequired: true, version: '1.9.4', minimumVersion: '2.0.0', installCommand: 'claude update', source: 'https://code.claude.com/docs/en/setup' } }
+        : undefined,
+  );
+  try {
+    page.render();
+    await page.settle();
+    page.click('login');
+    await page.settle();
+    assert.ok(page.text().includes(page.dictionary.cliUpdateRequired));
+    assert.ok(page.text().includes('claude update'));
+    assert.equal(page.text().includes(page.dictionary.claudeCliMissing), false);
+  } finally {
+    page.unmount();
+  }
+});

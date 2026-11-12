@@ -5,7 +5,15 @@ export interface AccessMethodWarning {
   lastReviewed: string;
 }
 
+/** What an Official CLI must satisfy, and the official way to bring an older one up to date. */
+export interface ProviderCliRequirements {
+  minimumVersion: string;
+  updateCommand: string;
+  source: string;
+}
+
 export interface ProviderCapabilities {
+  cli: ProviderCliRequirements;
   defaultAccessMethod: 'official-cli' | 'direct';
   accessMethods: ReadonlyArray<{
     id: 'official-cli' | 'direct';
@@ -14,6 +22,12 @@ export interface ProviderCapabilities {
 }
 
 export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
+  // 2.0.0 is the floor the official Agent SDK declares for its subprocess transport.
+  cli: {
+    minimumVersion: '2.0.0',
+    updateCommand: 'claude update',
+    source: 'https://code.claude.com/docs/en/setup',
+  },
   defaultAccessMethod: 'official-cli',
   accessMethods: [
     {
