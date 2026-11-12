@@ -130,6 +130,12 @@ export interface HttpLlmErrorOptions {
 }
 
 /**
+ * Failure code of Anthropic's HTTP 400 "Third-party apps now draw from your extra usage, not your plan limits" on a
+ * Direct sign-in Claude account. The request itself is at fault, so the pool rethrows it and nothing retries it.
+ */
+export const EXTRA_USAGE_REQUIRED_CODE = 'EXTRA_USAGE_REQUIRED';
+
+/**
  * Build an LlmError from a non-2xx provider response, mapping the status to a
  * stable code and, for a rate-limited request, the disclosed reset instant to
  * the `providerRetryAfterMs` the retry plugin waits out.

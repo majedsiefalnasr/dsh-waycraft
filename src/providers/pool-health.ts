@@ -16,6 +16,7 @@ import {
   QUOTA_EXCEEDED_CODE,
 } from '@deepseek-ai/dsh-llm';
 import type { ProviderId } from '../auth/store.js';
+import { EXTRA_USAGE_REQUIRED_CODE } from './common.js';
 
 /** Registry key for one pool member. */
 export function memberKey(
@@ -132,6 +133,8 @@ export function classifyPoolFailure(
         scope: 'member',
       };
     case CONTEXT_WINDOW_EXCEEDED_CODE:
+    // Billing policy of the Direct sign-in route, not of one account: another account would be refused alike.
+    case EXTRA_USAGE_REQUIRED_CODE:
     case 'ABORTED':
     default:
       return { action: 'throw' };

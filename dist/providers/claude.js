@@ -9,6 +9,7 @@ import { hostSupportsImageOffload, IMAGE_OFFLOAD_REQUIRED, requiredImageOffloadC
 import { markMessageCache, streamAnthropic, toAnthropicMessages, toAnthropicSystem, toAnthropicTools, } from '../translate/anthropic.js';
 import { httpLlmError, idleWatchdog, mapFetchFailure, mergeReasoning, ModelCatalogCache, discoverAcrossAccounts, discoverOrRetryAuth, isDiscoveryAborted, isMissingOrInvalidCredential, oauthEndpointError, OAuthEndpointError, } from './common.js';
 import { DISCOVERY_TIMEOUT_MS, unionAccountCatalogs, } from './accounts.js';
+import { EXTRA_USAGE_REQUIRED_CODE } from './common.js';
 import { proxiedFetch } from '../http.js';
 import { compareVersions } from './npm-cli-version.js';
 import { DEFAULT_RATE_LIMIT_WAIT, DEFAULT_RETRY, earliestReset, jsonBody, resetFromFields, resetInstantFromHeader, subscriptionRetryPolicy, } from './rate-limit.js';
@@ -450,6 +451,11 @@ function claudeMaxTokens(configured, disc) {
         ? preferred
         : Math.min(preferred, outputLimit);
 }
+/** The sentence Anthropic's 400 carries; matched case-insensitively against the error body. */
+const EXTRA_USAGE_PATTERN = /third-party apps now draw from your extra usage, not your plan limits/i;
+/** Plain explanation replacing the raw 400; the Settings and session surfaces localise their own copy. */
+export const EXTRA_USAGE_EXPLANATION = 'Claude refused this request because Anthropic now bills Direct sign-in requests to your extra usage instead of your plan limits. ' +
+    'Add this account through Official CLI to use your plan again.';
 /**
  * Anthropic rejects any image edge over 2000px once a request carries many
  * images, and every later turn resends the history, so one oversized
@@ -688,13 +694,24 @@ export class ClaudeAdapter extends LlmAdapter {
                 response = await this.request(options, session, watchdog.signal);
             }
             if (!response.ok) {
-                throw await httpLlmError(response, 'claude API', {
+                const failure = await httpLlmError(response, 'claude API', {
                     rateLimitReset: claudeRateLimitReset,
                     ...(this.options.onWarn === undefined
                         ? {}
                         : { onWarn: this.options.onWarn }),
                 });
+                if (response.status === 400 &&
+                    EXTRA_USAGE_PATTERN.test(failure.message)) {
+                    if (options.sessionId !== undefined)
+                        this.options.onExtraUsage?.(String(options.sessionId));
+                    throw new LlmError(EXTRA_USAGE_EXPLANATION, EXTRA_USAGE_REQUIRED_CODE, {
+                        status: 400,
+                    });
+                }
+                throw failure;
             }
+            if (options.sessionId !== undefined)
+                this.options.onTurnAccepted?.(String(options.sessionId));
             if (response.body === null) {
                 throw new LlmError('claude API returned no response body', EMPTY_RESPONSE_CODE);
             }
