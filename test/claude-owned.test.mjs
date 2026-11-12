@@ -3,7 +3,7 @@
 // every credential, token and HTTP exchange below is a fixture. Nothing touches the real Keychain, ~/.claude or Anthropic.
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, stat, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, stat, readFile, writeFile } from 'node:fs/promises';
 import { spawn as spawnChild } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -1155,6 +1155,59 @@ test('Claude declares Official CLI as its default access method through assemble
     }
   } finally {
     await h.dispose();
+  }
+});
+
+const versionRuntime = (version, spawned = []) => ({
+  async resolveExecutable() {
+    return '/fixture/bin/claude';
+  },
+  spawn(request) {
+    spawned.push(request);
+    return {
+      done: Promise.resolve({ exitCode: 0, signal: null }),
+      collected: { stdout: { readFrom: () => ({ text: version, lossy: false }) } },
+      async terminate() {},
+      async waitForExit() {},
+    };
+  },
+  spawnTerminal() {
+    throw new Error('sign-in must not start on an outdated CLI');
+  },
+});
+
+test('Official CLI login on a CLI older than the provider minimum offers the update command and starts no sign-in', async () => {
+  await home('cli-login-outdated');
+  const h = host({ io: fakeIo({}).io, subprocess: versionRuntime('1.9.4') });
+  try {
+    const result = await h.call('login', { provider: 'claude', method: 'official-cli' });
+    assert.equal(result.ok, true);
+    assert.equal(result.value.available, false);
+    assert.equal(result.value.updateRequired, true);
+    assert.equal(result.value.version, '1.9.4');
+    assert.equal(result.value.minimumVersion, '2.0.0');
+    assert.equal(result.value.installCommand, 'claude update');
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Claude status reports the installed CLI against the provider minimum for the account card', async () => {
+  for (const [name, version, updateRequired] of [['cli-status-old', '1.9.4', true], ['cli-status-new', '2.1.322', false]]) {
+    const root = await home(name);
+    const owned = join(root, 'plugins/waycraft/subscriptions/claude');
+    await mkdir(owned, { recursive: true });
+    await writeFile(
+      join(owned, 'accounts.json'),
+      JSON.stringify({ accounts: { '11111111-1111-4111-8111-111111111111': { accessMethod: 'official-cli', email: 'fixture@example.test', cliVersion: '2.1.322' } } }),
+    );
+    const h = host({ io: fakeIo({}).io, subprocess: versionRuntime(version) });
+    try {
+      const { cli } = (await h.call('status')).value.providers.claude;
+      assert.deepEqual(cli, { version, minimumVersion: '2.0.0', updateRequired, updateCommand: 'claude update', source: 'https://code.claude.com/docs/en/setup' });
+    } finally {
+      await h.dispose();
+    }
   }
 });
 

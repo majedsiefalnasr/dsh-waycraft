@@ -282,6 +282,16 @@ export function createClaudeCard(
       ? (accessMethod ?? status.capabilities.defaultAccessMethod)
       : undefined;
     const officialCli = selectedMethod === 'official-cli';
+    // The installed CLI is older than the provider minimum: say so, with the official command to update it.
+    const updateNotice = (cli: any, marker: string) =>
+      h(
+        'div',
+        { role: 'status', style: styles.statusLine, [marker]: 'true' },
+        t('cliUpdateRequired'),
+        h('p', null, t('cliInstalledVersion'), ' ', h('bdi', null, cli.version), ' · ', t('cliMinimumVersion'), ' ', h('bdi', null, cli.minimumVersion)),
+        h('pre', { dir: 'ltr', style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, cli.updateCommand),
+        h('a', { href: cli.source, target: '_blank', rel: 'noopener noreferrer' }, t('warningSource')),
+      );
     const startLogin = (method?: 'oauth' | 'keychain') => {
       void action(async () => {
         const selected = officialCli ? 'official-cli' : method;
@@ -514,6 +524,9 @@ export function createClaudeCard(
                     ' ',
                     h('bdi', null, account.cliVersion),
                   )
+                : null,
+              account.accessMethod === 'official-cli' && status?.cli?.updateRequired
+                ? updateNotice(status.cli, 'data-waycraft-cli-update')
                 : null,
               account.accessMethod === 'official-cli'
                 ? h(
@@ -783,7 +796,7 @@ export function createClaudeCard(
           ? h(
               'div',
               { role: 'status', style: styles.statusLine },
-              t('claudeCliMissing'),
+              t(cliInstallation.updateRequired ? 'cliUpdateRequired' : 'claudeCliMissing'),
               h(
                 'pre',
                 {

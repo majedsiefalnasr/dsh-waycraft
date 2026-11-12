@@ -1,5 +1,9 @@
 # Current work
 
+## Ticket #183 — 2026-11-12 (completed)
+
+Completed #183 only: provider-declared minimum CLI version (update message with the official command on the card and in the session, no run starts), `--help` flag probe with optional flags dropped and required ones reported by name, and a single non-looping retry for an optional flag refused at run time. Final gates and independent review recorded in [implementation evidence](ticket-183-implementation.md). No live CLI, sign-in, billing or installed-app verification. No push, main merge, release or npm publication. No next ticket started.
+
 ## Ticket #182 — 2026-11-12 (completed)
 
 Completed #182 only: Claude Official CLI text turns through the registered adapter (fresh `claude -p` stream-JSON process per turn, `--session-id` then `--resume`, per-account cap, scrubbed environment, allowlisted settings links reconciled before every run, cross-method Default in Provider settings). Owner decisions that replaced earlier wording are recorded in the specification and ADR-0005, ADR-0007 and ADR-0008; the live-inventory gate moved to #195. Final gates passed (typecheck, build, 1494 tests, fresh-build comparison) and independent Standards/Spec reviews have no open finding. See [implementation evidence](ticket-182-implementation.md). No live CLI, sign-in, Keychain, billing or installed-app verification. No push, main merge, release or npm publication. No next ticket started.

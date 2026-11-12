@@ -3,6 +3,9 @@ import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths';
+import { CLAUDE_CAPABILITIES } from '../provider-capabilities.js';
+import { compareVersions } from '../providers/npm-cli-version.js';
+import { parseHelpFlags } from './cli-flags.js';
 
 export interface CliProcess {
   stdout?: Readable;
@@ -413,6 +416,48 @@ export class ClaudeCliLogin {
   }
 }
 
+/** The message shown in a session (and logged) when the installed CLI is older than the provider minimum. */
+export function claudeCliUpdateMessage(version: string): string {
+  const { minimumVersion, updateCommand } = CLAUDE_CAPABILITIES.cli;
+  return `Claude CLI ${version} is older than the minimum supported version ${minimumVersion}. Update it with: ${updateCommand}`;
+}
+
+/** The message shown when the installed CLI lacks an option a run cannot do without. */
+export function claudeCliMissingFlagMessage(version: string, flag: string): string {
+  return `Claude CLI ${version} does not support the required option ${flag}. Update it with: ${CLAUDE_CAPABILITIES.cli.updateCommand}`;
+}
+
+/**
+ * The options the installed CLI advertises on its help page, or `undefined` when the page could not be read
+ * (the run then goes ahead and a refused flag is handled when it happens). Runs in the probe directory only.
+ */
+export async function probeClaudeCliFlags(runtime: ClaudeCliRuntime, path: string, callerSignal?: AbortSignal): Promise<Set<string> | undefined> {
+  const directory = claudeStorage('probe');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const signal = callerSignal ? AbortSignal.any([callerSignal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000);
+  const handle = runtime.spawn({
+    argv: [path, '--help'],
+    cwd: directory,
+    env: { CLAUDE_CONFIG_DIR: directory, ...SCRUBBED_ENV },
+    stdio: { stdin: 'ignore', stdout: { maxBytes: 256 * 1024 }, stderr: { maxBytes: 4096 } },
+    graceMs: 1000,
+    signal,
+  });
+  try {
+    const outcome = await handle.done;
+    callerSignal?.throwIfAborted();
+    const output = handle.collected.stdout?.readFrom(0);
+    if (signal.aborted || outcome.exitCode !== 0 || outcome.signal || !output || output.lossy) return undefined;
+    return parseHelpFlags(output.text);
+  } catch {
+    callerSignal?.throwIfAborted();
+    return undefined;
+  } finally {
+    await handle.terminate();
+    await handle.waitForExit();
+  }
+}
+
 /** Probes only a Waycraft-owned configuration directory, never the CLI default. */
 export async function discoverClaudeCli(runtime: ClaudeCliRuntime, callerSignal?: AbortSignal) {
   let path: string;
@@ -424,7 +469,7 @@ export async function discoverClaudeCli(runtime: ClaudeCliRuntime, callerSignal?
     return {
       available: false,
       installCommand: 'curl -fsSL https://claude.ai/install.sh | bash',
-      source: 'https://code.claude.com/docs/en/setup',
+      source: CLAUDE_CAPABILITIES.cli.source,
     };
   }
   const directory = claudeStorage('probe');
@@ -455,9 +500,17 @@ export async function discoverClaudeCli(runtime: ClaudeCliRuntime, callerSignal?
     const version = output?.text.match(/^(\d+\.\d+\.\d+)(?:\s|$)/)?.[1];
     if (!version)
       throw new Error('Claude CLI returned an unsupported version response');
-    // Official Agent SDK subprocess transport declares MINIMUM_CLAUDE_CODE_VERSION = '2.0.0'.
-    if (Number(version.split('.')[0]) < 2)
-      throw new Error('Claude CLI 2.0.0 or newer is required; update Claude Code and retry');
+    const { minimumVersion, updateCommand, source } = CLAUDE_CAPABILITIES.cli;
+    if (compareVersions(version, minimumVersion) < 0)
+      return {
+        available: false,
+        updateRequired: true,
+        path,
+        version,
+        minimumVersion,
+        installCommand: updateCommand,
+        source,
+      };
     return { available: true, path, version };
   } finally {
     await handle.terminate();
