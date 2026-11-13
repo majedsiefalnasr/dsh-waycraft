@@ -622,6 +622,7 @@ export function apply(ctx, config = {}, options = {}) {
         tokens: claudeTokens,
         cliRuntime,
         // Optional services: a composition without one still runs turns, and the CLI is told nobody could be asked.
+        cliTools: () => ctx.get('tools'),
         cliServices: (sessionId) => ({
             approval: ctx.get('approval'),
             userQuestions: ctx.get('userQuestions'),

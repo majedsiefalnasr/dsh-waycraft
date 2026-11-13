@@ -40,6 +40,11 @@ export interface ProviderCapabilities {
     id: 'official-cli' | 'direct';
     warning: AccessMethodWarning;
   }>;
+  /** DSH MCP tools made available to the Claude CLI and provider-specific limitations. */
+  cliTools: {
+    allowlist: readonly string[];
+    limitations: readonly string[];
+  };
 }
 
 export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
@@ -59,6 +64,12 @@ export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
     fallback: 'default',
   },
   defaultAccessMethod: 'official-cli',
+  cliTools: {
+    allowlist: ['get_goal', 'create_goal', 'update_goal', 'web_search'],
+    limitations: [
+      'DSH subagents are unavailable in Claude CLI sessions; use Claude CLI native subagents.',
+    ],
+  },
   accessMethods: [
     {
       id: 'official-cli',

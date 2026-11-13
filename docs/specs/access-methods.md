@@ -166,7 +166,9 @@ Recorded decisions: ADR-0005 (a subscription account carries its access method),
 ### Tools and approvals
 
 - CLI sessions use the CLI's own tools. DSH's tools reach the CLI through an MCP server Waycraft provides for the run.
-- The CLI's permission prompts, questions and plan reviews become DSH dialogs. DSH's permission mode maps to the CLI's corresponding mode.
+- The DSH MCP endpoint is a short-lived HTTP server bound only to `127.0.0.1` on an OS-selected port. Each CLI run gets its own unpredictable bearer token and MCP configuration; the token is never placed in argv. The config file is created with mode `0600` inside the Waycraft-owned account directory and removed with the run. The endpoint accepts only the expected loopback Host and requests without Origin, validates the token in constant time before protocol handling, and serves only the owning session/run. On turn end, cancellation, process failure or adapter disposal, the listener closes and the credential is revoked.
+- The CLI's permission prompts, questions and plan reviews become DSH dialogs. DSH's permission mode maps to the CLI's corresponding mode. MCP tool calls execute through DSH's normal ToolRuntime and approval pipeline with the current session agent and cancellation signal.
+- The local HTTP bridge is chosen over a spawned stdio MCP helper because Waycraft must invoke the in-process DSH ToolRuntime and its approval services; a helper would require a new cross-process IPC protocol. Loopback-only ephemeral binding, a per-run bearer token, strict request checks and deterministic teardown scope each endpoint to one run.
 
 ### Usage, limits and switching
 

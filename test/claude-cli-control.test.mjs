@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { readdir } from 'node:fs/promises';
 import {
   assert,
   policyMessage,
@@ -7,6 +8,141 @@ import {
 } from './claude-cli-control-harness.mjs';
 
 const settled = (ms = 25) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const until = async (condition, ms = 4000) => {
+  for (let waited = 0; !(await condition()) && waited < ms; waited += 25) await settled();
+  assert.ok(await condition(), 'condition was not reached in time');
+};
+
+/** The first record the fake CLI wrote that carries the given key. */
+const recordOf = (records, key) => records.find((entry) => key in entry);
+
+test('Claude CLI runs with exactly the scoped DSH tool allowlist and strict MCP config', async (t) => {
+  const schemas = ['get_goal', 'create_goal', 'update_goal', 'web_search', 'read_page'].map((name) => ({
+    name,
+    description: `${name} description`,
+    parameters: { type: 'object', properties: {} },
+  }));
+  const calls = [];
+  const tools = {
+    schemas(agent) {
+      assert.equal(agent.session.id, 'fixture-session');
+      return schemas;
+    },
+    async execute(input) {
+      calls.push(input);
+      return { isError: false, content: [{ type: 'text', text: 'done' }] };
+    },
+  };
+  const harness = await startHarness(t, { tools });
+  await harness.run('scenario:mcp');
+  assert.deepEqual(
+    (await readdir(harness.directory)).filter((name) => name.startsWith('.waycraft-mcp-')),
+    [],
+    'the run configuration is removed after turn completion',
+  );
+  const records = await harness.records();
+  const [{ args, env, mcpEvidence }] = records;
+  assert.ok(args.includes('--strict-mcp-config'));
+  assert.notEqual(args.indexOf('--mcp-config'), -1, 'a per-run MCP configuration is passed');
+  assert.deepEqual(mcpEvidence.serverNames, ['waycraft-dsh-tools']);
+  assert.deepEqual(mcpEvidence.serverKeys, ['headers', 'type', 'url']);
+  assert.match(mcpEvidence.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+  assert.equal(mcpEvidence.authHeaderPresent, true);
+  assert.equal(mcpEvidence.mode, 0o600);
+  assert.equal(env.DSH_MCP_TOKEN, undefined, 'token is not added to the process environment');
+  const security = recordOf(records, 'invalidHostStatus');
+  assert.equal(security.invalidHostStatus, 401);
+  assert.equal(security.missingTokenStatus, 401);
+  assert.equal(security.wrongTokenStatus, 401);
+  assert.equal(security.originStatus, 401);
+  assert.deepEqual(
+    recordOf(records, 'mcpListedTools').mcpListedTools,
+    ['get_goal', 'create_goal', 'update_goal', 'web_search'],
+    'only the allowlisted tools are offered, never read_page',
+  );
+  assert.equal(recordOf(records, 'mcpToolResultError').mcpToolResultError, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, 'web_search');
+  assert.deepEqual(calls[0].arguments, { query: 'from-cli' });
+  assert.equal(calls[0].agent.session.id, 'fixture-session');
+  assert.ok(calls[0].signal instanceof AbortSignal);
+});
+
+test('cancelling a Claude CLI turn closes its MCP endpoint and removes its config', async (t) => {
+  const harness = await startHarness(t);
+  const controller = new AbortController();
+  const turn = harness.run('scenario:hold-mcp', { signal: controller.signal }).then(
+    () => 'finished',
+    () => 'rejected',
+  );
+  await until(async () => (await harness.records()).length > 0);
+  const [{ mcpEvidence }] = await harness.records();
+  assert.match(mcpEvidence.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+  controller.abort();
+  assert.equal(await turn, 'rejected');
+  assert.equal(harness.children.size, 0);
+  assert.deepEqual(
+    (await readdir(harness.directory)).filter((name) => name.startsWith('.waycraft-mcp-')),
+    [],
+  );
+  await assert.rejects(fetch(mcpEvidence.url, { method: 'POST' }), 'the listener is closed');
+});
+
+test('a title or summary request runs with no tools, one turn and no MCP server', async (t) => {
+  const harness = await startHarness(t, {
+    tools: {
+      schemas() {
+        throw new Error('tools must not be requested');
+      },
+    },
+  });
+  await harness.run('scenario:plain', { purpose: 'session-title' });
+  await harness.run('scenario:plain', { purpose: 'compaction' });
+  const records = await harness.records();
+  assert.equal(records.length, 2);
+  for (const { args, mcpEvidence } of records) {
+    assert.equal(args[args.indexOf('--tools') + 1], '', 'every tool is disabled');
+    assert.equal(args[args.indexOf('--max-turns') + 1], '1');
+    assert.ok(args.includes('--strict-mcp-config'), "the CLI's own MCP servers stay out");
+    assert.equal(args.includes('--mcp-config'), false);
+    assert.equal(mcpEvidence, undefined);
+  }
+});
+
+test('a turn whose session has no agent still runs, without DSH tools and without the CLI own MCP servers', async (t) => {
+  const harness = await startHarness(t);
+  assert.equal(textOf(await harness.run('scenario:plain', { sessionId: undefined })), 'Hello');
+  const [{ args }] = await harness.records();
+  assert.equal(args.includes('--mcp-config'), false);
+  assert.ok(args.includes('--strict-mcp-config'));
+  assert.equal(args[args.indexOf('--tools') + 1], 'default');
+});
+
+test('sessions on one CLI account run in separate processes and runs beyond the cap wait', async (t) => {
+  const harness = await startHarness(t);
+  const held = Array.from({ length: 4 }, (_, index) => {
+    const controller = new AbortController();
+    const outcome = harness
+      .run('scenario:hold-mcp', { sessionId: `sub-${index}`, signal: controller.signal })
+      .then(
+        () => 'finished',
+        () => 'rejected',
+      );
+    return { controller, outcome };
+  });
+  await until(async () => (await harness.records()).length === 4);
+  assert.equal(new Set((await harness.records()).map(({ pid }) => pid)).size, 4, 'one process each');
+  const fifth = harness.run('scenario:plain', { sessionId: 'sub-4' });
+  await settled(300);
+  assert.equal((await harness.records()).length, 4, 'the fifth run waits instead of starting');
+  held[0].controller.abort();
+  assert.equal(textOf(await fifth), 'Hello', 'it starts once a slot frees');
+  assert.equal((await harness.records()).length, 5);
+  for (const { controller } of held.slice(1)) controller.abort();
+  await Promise.all(held.map(({ outcome }) => outcome));
+  assert.equal(harness.children.size, 0);
+});
 
 /** An approval service whose answer the test chooses; every request is kept for inspection. */
 function approvalService(answer) {

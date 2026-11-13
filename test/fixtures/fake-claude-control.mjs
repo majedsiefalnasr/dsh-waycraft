@@ -2,8 +2,10 @@
 // It answers --version and --help, reads one stream-json user envelope from stdin, then plays a scenario chosen by
 // a marker in the prompt. Everything it receives (arguments, environment, envelope, control responses) is appended
 // to the file named by FAKE_CLAUDE_RECORD.
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
@@ -26,6 +28,9 @@ if (args.includes('--help')) {
       '  --permission-mode <m>',
       '  --permission-prompt-tool <t>',
       '  --tools <t>',
+      '  --mcp-config <file>',
+      '  --strict-mcp-config',
+      '  --max-turns <n>',
     ].join('\n'),
   );
   process.exit(0);
@@ -61,7 +66,55 @@ const envelope = await nextLine();
 const message = JSON.parse(envelope ?? '{}');
 const content = message.message?.content;
 const prompt = typeof content === 'string' ? content : JSON.stringify(content);
-record({ args, env: process.env, envelope: message });
+const configIndex = args.indexOf('--mcp-config');
+const mcpConfig = configIndex < 0 ? undefined : JSON.parse(readFileSync(args[configIndex + 1], 'utf8'));
+const mcpServer = mcpConfig?.mcpServers?.['waycraft-dsh-tools'];
+const mcpEvidence = mcpServer ? {
+  serverNames: Object.keys(mcpConfig.mcpServers),
+  serverKeys: Object.keys(mcpServer).sort(),
+  url: mcpServer.url,
+  authHeaderPresent: typeof mcpServer.headers?.Authorization === 'string',
+  mode: statSync(args[configIndex + 1]).mode & 0o777,
+} : undefined;
+record({ pid: process.pid, args, env: process.env, envelope: message, mcpEvidence });
+
+if (prompt.includes('scenario:mcp')) {
+  const unauthorized = await fetch(mcpServer.url, {
+    method: 'POST',
+    headers: { host: 'localhost', 'content-type': 'application/json' },
+    body: '{}',
+  });
+  const missingToken = await fetch(mcpServer.url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  });
+  const wrongToken = await fetch(mcpServer.url, {
+    method: 'POST',
+    headers: { ...mcpServer.headers, authorization: 'Bearer wrong', 'content-type': 'application/json' },
+    body: '{}',
+  });
+  const originRequest = await fetch(mcpServer.url, {
+    method: 'POST',
+    headers: { ...mcpServer.headers, origin: 'http://localhost', 'content-type': 'application/json' },
+    body: '{}',
+  });
+  record({ invalidHostStatus: unauthorized.status, missingTokenStatus: missingToken.status, wrongTokenStatus: wrongToken.status, originStatus: originRequest.status });
+  const client = new Client({ name: 'fake-claude', version: '1.0.0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(mcpServer.url), {
+    requestInit: { headers: mcpServer.headers },
+  }));
+  const listed = await client.listTools();
+  record({ mcpListedTools: listed.tools.map(({ name }) => name) });
+  const toolResult = await client.callTool({ name: 'web_search', arguments: { query: 'from-cli' } });
+  record({ mcpToolResultError: toolResult.isError === true });
+  await client.close();
+  finish();
+}
+
+if (prompt.includes('scenario:hold-mcp')) {
+  await new Promise(() => {});
+}
 
 if (prompt.includes('scenario:plain')) {
   text('Hello');

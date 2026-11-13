@@ -20,7 +20,7 @@ test('registered Claude adapter streams once, resumes on its bound account, and 
   await writeFile(join(root, 'plugins/waycraft/subscriptions/provider-settings.json'), JSON.stringify({ providers: { claude: { accounts: { [`official-cli:${id2}`]: { independentEntry: true } } } }, toolHistory: [] }));
   const executable = join(root, 'fake-claude.mjs');
   await writeFile(executable, `import {appendFileSync} from 'node:fs';
-const args=process.argv.slice(2); if(args.includes('--version')) { console.log('2.1.322'); } else if(args.includes('--help')) { console.log('Options:\\n  -p, --print\\n  --input-format <f>\\n  --output-format <f>\\n  --verbose\\n  --include-partial-messages\\n  --model <m>\\n  --session-id <id>\\n  --resume <id>\\n  --system-prompt <p>'); } else {
+const args=process.argv.slice(2); if(args.includes('--version')) { console.log('2.1.322'); } else if(args.includes('--help')) { console.log('Options:\\n  -p, --print\\n  --input-format <f>\\n  --output-format <f>\\n  --verbose\\n  --include-partial-messages\\n  --model <m>\\n  --session-id <id>\\n  --resume <id>\\n  --system-prompt <p>\\n  --mcp-config <file>\\n  --strict-mcp-config'); } else {
 let input=''; for await(const chunk of process.stdin){ input+=chunk; if(input.includes('\\n')) break; }
 appendFileSync(${JSON.stringify(join(root, 'record.jsonl'))},JSON.stringify({args,env:process.env,input})+'\\n');
 if(args.includes('--resume') && input.includes('missing-session')) { console.log(JSON.stringify({type:'result',is_error:true,result:'No conversation found with session ID: fixture'})); process.exit(1); }
@@ -54,7 +54,9 @@ if(input.includes('hold')) { setInterval(()=>{},1000); } else say({type:'result'
     },
   };
   const adapters = {}, cleanups = [];
-  const ctx = { logger: { warn() {} }, llm: { registerAdapter(ids, adapter) { adapters[ids[0]] = adapter; return { replace() {} }; } }, get(name) { return name === 'subprocess' ? runtime : undefined; }, effect(fn) { const cleanup = fn(); if (cleanup) cleanups.push(cleanup); }, inject() {} };
+  const tools = { schemas: () => [], async execute() { throw new Error('no tools are registered in this fixture'); } };
+  const agents = { get: (sessionId) => ({ session: { id: sessionId, header: {} } }) };
+  const ctx = { logger: { warn() {} }, llm: { registerAdapter(ids, adapter) { adapters[ids[0]] = adapter; return { replace() {} }; } }, get(name) { return name === 'subprocess' ? runtime : name === 'tools' ? tools : name === 'agents' ? agents : undefined; }, effect(fn) { const cleanup = fn(); if (cleanup) cleanups.push(cleanup); }, inject() {} };
   apply(ctx, { models: { claude: [{ id: 'claude-fixture' }] } }, { claudeCredsIo: { platform: 'linux', readFileRaw() { return undefined; }, readKeychainRaw() { throw new Error('Keychain forbidden'); } } });
   t.after(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); for (const child of children) child.kill(); });
   const base = { provider: 'claude', model: 'claude-fixture', sessionId: 'fixture-session', messages: [{ role: 'user', content: 'hi' }] };

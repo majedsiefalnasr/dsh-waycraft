@@ -19,6 +19,8 @@ const ALL_FLAGS = [
   '--session-id',
   '--resume',
   '--system-prompt',
+  '--mcp-config',
+  '--strict-mcp-config',
 ];
 const id = '11111111-1111-4111-8111-111111111111';
 
@@ -116,7 +118,12 @@ say({type:'result',session_id:'22222222-2222-4222-8222-222222222222',is_error:fa
   const ctx = {
     logger: { warn() {} },
     llm: { registerAdapter(ids, adapter) { adapters[ids[0]] = adapter; return { replace() {} }; } },
-    get(name) { return name === 'subprocess' ? runtime : undefined; },
+    get(name) {
+      if (name === 'subprocess') return runtime;
+      if (name === 'tools') return { schemas: () => [], async execute() { throw new Error('no tools are registered in this fixture'); } };
+      if (name === 'agents') return { get: (sessionId) => ({ session: { id: sessionId, header: {} } }) };
+      return undefined;
+    },
     effect(fn) { const cleanup = fn(); if (cleanup) cleanups.push(cleanup); },
     inject() {},
   };
