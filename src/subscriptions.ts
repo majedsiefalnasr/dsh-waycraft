@@ -36,7 +36,8 @@ import { join } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 // Type-only: activates the `ctx.tools` / `ctx.web` Context merges for the optional inject blocks below.
-import type {} from '@deepseek-ai/dsh-tools';
+import type { ToolRuntime } from '@deepseek-ai/dsh-tools';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 import type {} from '@deepseek-ai/dsh-web';
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment';
 import { OAuthFlowManager } from './auth/oauth-flow.js';
@@ -883,6 +884,7 @@ export function apply(
     tokens: claudeTokens,
     cliRuntime,
     // Optional services: a composition without one still runs turns, and the CLI is told nobody could be asked.
+    cliTools: () => ctx.get('tools') as ToolRuntime | undefined,
     cliServices: (sessionId) => ({
       approval: ctx.get('approval') as unknown as CliControlServices['approval'],
       userQuestions: ctx.get('userQuestions') as unknown as CliControlServices['userQuestions'],
@@ -891,7 +893,7 @@ export function apply(
           ? undefined
           : (
               ctx.get('agents') as unknown as
-                | { get(id: string): unknown }
+                | { get(id: string): Agent | undefined }
                 | undefined
             )?.get(sessionId),
       planReviewText: planReviewTextFor(

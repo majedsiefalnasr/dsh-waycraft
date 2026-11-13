@@ -15,6 +15,12 @@ export const CLAUDE_CAPABILITIES = {
         fallback: 'default',
     },
     defaultAccessMethod: 'official-cli',
+    cliTools: {
+        allowlist: ['get_goal', 'create_goal', 'update_goal', 'web_search'],
+        limitations: [
+            'DSH subagents are unavailable in Claude CLI sessions; use Claude CLI native subagents.',
+        ],
+    },
     accessMethods: [
         {
             id: 'official-cli',

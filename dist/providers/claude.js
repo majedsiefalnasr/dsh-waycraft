@@ -9,6 +9,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { claudeCliMissingFlagMessage, claudeCliUpdateMessage, discoverClaudeCli, prepareClaudeCliAccountDirectory, probeClaudeCliFlags, SCRUBBED_ENV } from '../auth/claude-cli.js';
 import { answerControlRequest, approvalsDisabled, controlErrorLine, controlResponseLine, permissionModeFor } from '../auth/claude-cli-control.js';
 import { planCliArguments, refusedFlag } from '../auth/cli-flags.js';
+import { createClaudeCliMcpRun, MCP_CONFIG_PLACEHOLDER } from '../auth/claude-cli-mcp.js';
 import { translateClaudeCliStream } from '../translate/claude-cli.js';
 import { EMPTY_RESPONSE_CODE, errorChain, LlmAdapter, LlmError, ReasoningEffortId, } from '@deepseek-ai/dsh-llm';
 import { hostSupportsImageOffload, IMAGE_OFFLOAD_REQUIRED, requiredImageOffloadCount, resolveImages, } from '../translate/resolved.js';
@@ -783,6 +784,14 @@ export class ClaudeAdapter extends LlmAdapter {
         const permissionMode = permissionModeFor(options.messages);
         const promptsDisabled = approvalsDisabled(options.messages);
         const images = await this.promptImages(prompt, options.signal);
+        // Titles and summaries (the requests DSH tags with a purpose) are single-turn runs with no tools at all.
+        const sideRequest = options.purpose !== undefined;
+        const services = this.options.cliServices?.(options.sessionId) ?? {};
+        const mcpTools = sideRequest ? undefined : this.options.cliTools?.();
+        const agent = services.agent;
+        const withDshTools = mcpTools !== undefined && agent !== undefined;
+        if (!sideRequest && !withDshTools)
+            this.options.onWarn?.('Claude CLI turn runs without DSH tools: the tool service or the session agent is unavailable');
         const parts = [
             ...(options.system ? [{ flag: '--system-prompt', args: ['--system-prompt', options.system] }] : []),
             { flag: '--print', args: ['-p'] },
@@ -796,13 +805,17 @@ export class ClaudeAdapter extends LlmAdapter {
             // An older CLI without these flags still runs: it then denies what needs a prompt instead of asking.
             { flag: '--permission-mode', args: ['--permission-mode', permissionMode], optional: true },
             { flag: '--permission-prompt-tool', args: ['--permission-prompt-tool', 'stdio'], optional: true },
-            { flag: '--tools', args: ['--tools', 'default'], optional: true },
+            // A side request must not fall back to the CLI's tools when the flag is unsupported, so there it is required.
+            { flag: '--tools', args: ['--tools', sideRequest ? '' : 'default'], optional: !sideRequest },
+            ...(sideRequest ? [{ flag: '--max-turns', args: ['--max-turns', '1'], optional: true }] : []),
+            // The run sees only the servers Waycraft hands it (ADR-0006): none for a side request, the DSH tools otherwise.
+            { flag: '--strict-mcp-config', args: ['--strict-mcp-config'] },
+            ...(withDshTools ? [{ flag: '--mcp-config', args: ['--mcp-config', MCP_CONFIG_PLACEHOLDER] }] : []),
             prior ? { flag: '--resume', args: ['--resume', prior] } : { flag: '--session-id', args: ['--session-id', randomUUID()] },
         ];
         const plan = planCliArguments(parts, supported, refused);
         if (plan.missing.length)
             throw new Error(claudeCliMissingFlagMessage(discovery.version, plan.missing.join(', ')));
-        const argv = [discovery.path, ...plan.argv];
         if (this.disposed)
             throw new Error('Claude adapter is disposed');
         const controller = new AbortController();
@@ -810,8 +823,19 @@ export class ClaudeAdapter extends LlmAdapter {
         const watchdog = idleWatchdog(caller, this.options.streamIdleTimeoutMs);
         const signal = watchdog.signal;
         signal.throwIfAborted();
-        // stdin stays open for the whole turn so control replies can be written; it is ended when the result arrives.
-        const handle = runtime.spawn({ argv, cwd: directory, env: { CLAUDE_CONFIG_DIR: directory, ...SCRUBBED_ENV }, stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 64 * 1024 } }, graceMs: 1000, signal });
+        const mcpRun = withDshTools
+            ? await createClaudeCliMcpRun({ accountDirectory: directory, runtime: mcpTools, agent, signal })
+            : undefined;
+        const argv = [discovery.path, ...plan.argv.map((arg) => (arg === MCP_CONFIG_PLACEHOLDER ? mcpRun.configPath : arg))];
+        let handle;
+        try {
+            // stdin stays open for the whole turn so control replies can be written; it is ended when the result arrives.
+            handle = runtime.spawn({ argv, cwd: directory, env: { CLAUDE_CONFIG_DIR: directory, ...SCRUBBED_ENV }, stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 64 * 1024 } }, graceMs: 1000, signal });
+        }
+        catch (error) {
+            await mcpRun?.close();
+            throw error;
+        }
         const turn = { controller, closed: handle.waitForExit() };
         this.cliTurns.add(turn);
         // Observe spawn failures immediately, including while the output iterator is pending.
@@ -828,7 +852,6 @@ export class ClaudeAdapter extends LlmAdapter {
         // Dialogs the Owner has not answered yet, by request id. A dialog ends when answered, when the CLI withdraws it,
         // or when the turn ends or is aborted: its signal is the turn's signal, so none is left open.
         const dialogs = new Map();
-        const services = this.options.cliServices?.(options.sessionId) ?? {};
         // A person thinking over a dialog is not an idle stream: keep the idle watchdog from ending the turn meanwhile.
         const keepAlive = setInterval(() => { if (dialogs.size > 0)
             watchdog.pulse(); }, 15_000);
@@ -945,6 +968,7 @@ export class ClaudeAdapter extends LlmAdapter {
             }
             finally {
                 this.cliTurns.delete(turn);
+                await mcpRun?.close();
             }
         }
         if (retryWithoutFlag)

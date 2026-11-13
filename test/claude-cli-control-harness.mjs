@@ -40,6 +40,12 @@ export async function startHarness(t, services = {}, options = {}) {
     }),
   );
   const children = new Set();
+  const defaultTools = {
+    schemas: () => [],
+    async execute() {
+      throw new Error('unexpected DSH tool execution');
+    },
+  };
   const runtime = {
     resolveExecutable: async () => FAKE,
     spawn(spec) {
@@ -110,7 +116,7 @@ export async function startHarness(t, services = {}, options = {}) {
       if (name === 'subprocess') return runtime;
       if (name === 'agents')
         return { get: (id) => ({ session: { id, header: {} } }) };
-      return services[name];
+      return name === 'tools' ? services[name] ?? defaultTools : services[name];
     },
     effect(fn) {
       const cleanup = fn();
@@ -142,17 +148,19 @@ export async function startHarness(t, services = {}, options = {}) {
     else process.env.FAKE_CLAUDE_RECORD = originalRecord;
     await rm(root, { recursive: true, force: true });
   });
-  const run = async (prompt, extra = {}) => {
+  const stream = (prompt, extra = {}) => {
     const messages = extra.messages ?? [{ role: 'user', content: prompt }];
-    const chunks = [];
-    for await (const chunk of adapters.claude.stream({
+    return adapters.claude.stream({
       provider: 'claude',
       model: 'claude-fixture',
       sessionId: 'fixture-session',
       ...extra,
       messages,
-    }))
-      chunks.push(chunk);
+    });
+  };
+  const run = async (prompt, extra = {}) => {
+    const chunks = [];
+    for await (const chunk of stream(prompt, extra)) chunks.push(chunk);
     return chunks;
   };
   const records = async () => {
@@ -165,7 +173,7 @@ export async function startHarness(t, services = {}, options = {}) {
       return [];
     }
   };
-  return { run, records, children, root };
+  return { run, stream, records, children, root, directory: owned };
 }
 
 /** The visible text of a chunk list, in stream order. */
