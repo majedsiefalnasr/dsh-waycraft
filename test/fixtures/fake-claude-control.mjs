@@ -31,6 +31,7 @@ if (args.includes('--help')) {
       '  --mcp-config <file>',
       '  --strict-mcp-config',
       '  --max-turns <n>',
+      '  --settings <file-or-json>',
     ].join('\n'),
   );
   process.exit(0);
@@ -76,7 +77,7 @@ const mcpEvidence = mcpServer ? {
   authHeaderPresent: typeof mcpServer.headers?.Authorization === 'string',
   mode: statSync(args[configIndex + 1]).mode & 0o777,
 } : undefined;
-record({ pid: process.pid, args, env: process.env, envelope: message, mcpEvidence });
+record({ pid: process.pid, args, env: process.env, envelope: message, mcpEvidence, mcpServers: mcpConfig?.mcpServers });
 
 if (prompt.includes('scenario:mcp')) {
   const unauthorized = await fetch(mcpServer.url, {

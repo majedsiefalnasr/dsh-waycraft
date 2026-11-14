@@ -30,7 +30,15 @@ const id = '11111111-1111-4111-8111-111111111111';
  * @param options.help - flags `--help` advertises; `null` prints no flag list at all.
  * @param options.refuse - flags the executable rejects at run time as unknown options.
  */
-async function start(t, { version = '2.1.322', help = ALL_FLAGS, refuse = [], refuseAlways = false } = {}) {
+async function start(
+  t,
+  {
+    version = '2.1.322',
+    help = ALL_FLAGS,
+    refuse = [],
+    refuseAlways = false,
+  } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), 'waycraft-cli-compat-'));
   const original = process.env.DSH_HOME;
   process.env.DSH_HOME = root;
@@ -43,7 +51,11 @@ async function start(t, { version = '2.1.322', help = ALL_FLAGS, refuse = [], re
   await mkdir(owned, { recursive: true });
   await writeFile(
     join(owned, 'accounts.json'),
-    JSON.stringify({ accounts: { [id]: { accessMethod: 'official-cli', email: 'fixture@example.test' } } }),
+    JSON.stringify({
+      accounts: {
+        [id]: { accessMethod: 'official-cli', email: 'fixture@example.test' },
+      },
+    }),
   );
   const record = join(root, 'record.jsonl');
   const executable = join(root, 'fake-claude.mjs');
@@ -83,14 +95,21 @@ say({type:'result',session_id:'22222222-2222-4222-8222-222222222222',is_error:fa
         if (value === undefined) delete env[key];
         else env[key] = value;
       }
-      const child = spawn(process.execPath, [spec.argv[0], ...spec.argv.slice(1)], { cwd: spec.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(
+        process.execPath,
+        [spec.argv[0], ...spec.argv.slice(1)],
+        { cwd: spec.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] },
+      );
       children.add(child);
       let output = '';
-      if (spec.stdio.stdout !== 'pipe') child.stdout.on('data', (chunk) => (output += chunk));
+      if (spec.stdio.stdout !== 'pipe')
+        child.stdout.on('data', (chunk) => (output += chunk));
       let errors = '';
       child.stderr.on('data', (chunk) => (errors += chunk));
       // Follows the real subprocess service: 'pipe' stays open for the caller, { data } is written and ended.
-      const stdinMode = spec.stdio.stdin; if (stdinMode === 'ignore') child.stdin.end(); else if (typeof stdinMode === 'object') child.stdin.end(stdinMode.data);
+      const stdinMode = spec.stdio.stdin;
+      if (stdinMode === 'ignore') child.stdin.end();
+      else if (typeof stdinMode === 'object') child.stdin.end(stdinMode.data);
       const done = new Promise((resolve, reject) => {
         child.once('error', reject);
         child.once('close', (exitCode, signal) => {
@@ -105,7 +124,10 @@ say({type:'result',session_id:'22222222-2222-4222-8222-222222222222',is_error:fa
         stdin: stdinMode === 'pipe' ? child.stdin : undefined,
         stdout: child.stdout,
         done,
-        collected: { stdout: { readFrom: () => ({ text: output, lossy: false }) }, stderr: { readFrom: () => ({ text: errors, lossy: false }) } },
+        collected: {
+          stdout: { readFrom: () => ({ text: output, lossy: false }) },
+          stderr: { readFrom: () => ({ text: errors, lossy: false }) },
+        },
         terminate: async () => {
           if (children.has(child)) child.kill();
         },
@@ -117,35 +139,80 @@ say({type:'result',session_id:'22222222-2222-4222-8222-222222222222',is_error:fa
   const cleanups = [];
   const ctx = {
     logger: { warn() {} },
-    llm: { registerAdapter(ids, adapter) { adapters[ids[0]] = adapter; return { replace() {} }; } },
+    llm: {
+      registerAdapter(ids, adapter) {
+        adapters[ids[0]] = adapter;
+        return { replace() {} };
+      },
+    },
     get(name) {
       if (name === 'subprocess') return runtime;
-      if (name === 'tools') return { schemas: () => [], async execute() { throw new Error('no tools are registered in this fixture'); } };
-      if (name === 'agents') return { get: (sessionId) => ({ session: { id: sessionId, header: {} } }) };
+      if (name === 'tools')
+        return {
+          schemas: () => [],
+          async execute() {
+            throw new Error('no tools are registered in this fixture');
+          },
+        };
+      if (name === 'agents')
+        return {
+          get: (sessionId) => ({ session: { id: sessionId, header: {} } }),
+        };
       return undefined;
     },
-    effect(fn) { const cleanup = fn(); if (cleanup) cleanups.push(cleanup); },
+    effect(fn) {
+      const cleanup = fn();
+      if (cleanup) cleanups.push(cleanup);
+    },
     inject() {},
   };
-  apply(ctx, { models: { claude: [{ id: 'claude-fixture' }] } }, { claudeCredsIo: { platform: 'linux', readFileRaw() { return undefined; }, readKeychainRaw() { throw new Error('Keychain forbidden'); } } });
+  apply(
+    ctx,
+    { models: { claude: [{ id: 'claude-fixture' }] } },
+    {
+      claudeCredsIo: {
+        platform: 'linux',
+        readFileRaw() {
+          return undefined;
+        },
+        readKeychainRaw() {
+          throw new Error('Keychain forbidden');
+        },
+      },
+    },
+  );
   t.after(async () => {
     for (const cleanup of cleanups.reverse()) await cleanup();
     for (const child of children) child.kill();
   });
   const records = async () => {
     try {
-      return (await readFile(record, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
+      return (await readFile(record, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map(JSON.parse);
     } catch {
       return [];
     }
   };
-  const base = { provider: 'claude', model: 'claude-fixture', sessionId: 'fixture-session', messages: [{ role: 'user', content: 'hi' }] };
+  const base = {
+    provider: 'claude',
+    model: 'claude-fixture',
+    sessionId: 'fixture-session',
+    messages: [{ role: 'user', content: 'hi' }],
+  };
   const run = async (extra = {}) => {
     const chunks = [];
-    for await (const chunk of adapters.claude.stream({ ...base, ...extra })) chunks.push(chunk);
+    for await (const chunk of adapters.claude.stream({ ...base, ...extra }))
+      chunks.push(chunk);
     return chunks;
   };
-  const text = (chunks) => chunks.filter((c) => c.type === 'text-delta').map((c) => c.text).join('');
+  const text = (chunks) =>
+    chunks
+      .filter((c) => c.type === 'text-delta')
+      .map((c) => c.text)
+      .join('');
   const turns = async () => (await records()).filter((r) => r.kind === 'turn');
   return { run, text, records, turns, children };
 }
@@ -166,17 +233,27 @@ test('a CLI older than the provider minimum names the update command and no run 
 });
 
 test('a run on a CLI without an optional flag completes without that flag', async (t) => {
-  const cli = await start(t, { help: ALL_FLAGS.filter((flag) => flag !== '--include-partial-messages') });
+  const cli = await start(t, {
+    help: ALL_FLAGS.filter((flag) => flag !== '--include-partial-messages'),
+  });
   assert.equal(cli.text(await cli.run()), 'Hello');
   const [turn] = await cli.turns();
   assert.equal(turn.args.includes('--include-partial-messages'), false);
-  for (const flag of ['--input-format', '--output-format', '--verbose', '--model', '--session-id'])
+  for (const flag of [
+    '--input-format',
+    '--output-format',
+    '--verbose',
+    '--model',
+    '--session-id',
+  ])
     assert.ok(turn.args.includes(flag), `${flag} stays`);
   assert.equal(cli.children.size, 0);
 });
 
 test('a run on a CLI without a required flag fails naming what is missing and starts nothing', async (t) => {
-  const cli = await start(t, { help: ALL_FLAGS.filter((flag) => flag !== '--session-id') });
+  const cli = await start(t, {
+    help: ALL_FLAGS.filter((flag) => flag !== '--session-id'),
+  });
   await assert.rejects(cli.run(), (error) => {
     assert.match(reason(error), /--session-id/);
     assert.match(reason(error), /claude update/);
@@ -186,8 +263,12 @@ test('a run on a CLI without a required flag fails naming what is missing and st
 });
 
 test('a missing required flag is named when a system prompt needs --system-prompt', async (t) => {
-  const cli = await start(t, { help: ALL_FLAGS.filter((flag) => flag !== '--system-prompt') });
-  await assert.rejects(cli.run({ system: 'Be brief' }), (error) => /--system-prompt/.test(reason(error)));
+  const cli = await start(t, {
+    help: ALL_FLAGS.filter((flag) => flag !== '--system-prompt'),
+  });
+  await assert.rejects(cli.run({ system: 'Be brief' }), (error) =>
+    /--system-prompt/.test(reason(error)),
+  );
   assert.deepEqual(await cli.turns(), []);
   // Without a system prompt that flag is never needed.
   assert.equal(cli.text(await cli.run()), 'Hello');
@@ -202,7 +283,10 @@ test('the flag probe runs once per installed version, not once per turn', async 
   const cli = await start(t);
   await cli.run();
   await cli.run();
-  assert.equal((await cli.records()).filter((r) => r.kind === 'help').length, 1);
+  assert.equal(
+    (await cli.records()).filter((r) => r.kind === 'help').length,
+    1,
+  );
 });
 
 test('an optional flag refused at run time is dropped once, retried once and never offered again', async (t) => {
@@ -237,5 +321,8 @@ test('a required flag refused at run time is reported by name with a single atte
 test('turns that arrive together share one flag probe', async (t) => {
   const cli = await start(t);
   await Promise.all([cli.run(), cli.run(), cli.run()]);
-  assert.equal((await cli.records()).filter((r) => r.kind === 'help').length, 1);
+  assert.equal(
+    (await cli.records()).filter((r) => r.kind === 'help').length,
+    1,
+  );
 });

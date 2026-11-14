@@ -18,6 +18,7 @@ const sources = [
   'src/browser.ts',
   'src/codex-card.ts',
   'src/claude-card.ts',
+  'src/cli-governance-notice.ts',
 ].filter((file) => /\.tsx?$/.test(file));
 const used = new Map();
 for (const file of sources) {

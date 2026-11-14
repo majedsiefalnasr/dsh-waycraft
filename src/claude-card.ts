@@ -288,9 +288,30 @@ export function createClaudeCard(
         'div',
         { role: 'status', style: styles.statusLine, [marker]: 'true' },
         t('cliUpdateRequired'),
-        h('p', null, t('cliInstalledVersion'), ' ', h('bdi', null, cli.version), ' · ', t('cliMinimumVersion'), ' ', h('bdi', null, cli.minimumVersion)),
-        h('pre', { dir: 'ltr', style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, cli.updateCommand),
-        h('a', { href: cli.source, target: '_blank', rel: 'noopener noreferrer' }, t('warningSource')),
+        h(
+          'p',
+          null,
+          t('cliInstalledVersion'),
+          ' ',
+          h('bdi', null, cli.version),
+          ' · ',
+          t('cliMinimumVersion'),
+          ' ',
+          h('bdi', null, cli.minimumVersion),
+        ),
+        h(
+          'pre',
+          {
+            dir: 'ltr',
+            style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+          },
+          cli.updateCommand,
+        ),
+        h(
+          'a',
+          { href: cli.source, target: '_blank', rel: 'noopener noreferrer' },
+          t('warningSource'),
+        ),
       );
     const startLogin = (method?: 'oauth' | 'keychain') => {
       void action(async () => {
@@ -340,6 +361,100 @@ export function createClaudeCard(
         },
       });
     }, [presentation, pending, busy, login?.loginId]);
+    // What the MCP manager and Skill manager give an Official CLI session. Names and reasons only: the host never sends
+    // a value from a server's configuration.
+    const MCP_REASON_KEYS: Record<string, string> = {
+      disabled: 'cliMcpReasonDisabled',
+      untrusted: 'cliMcpReasonUntrusted',
+      changed: 'cliMcpReasonChanged',
+      'needs-credential': 'cliMcpReasonNeedsCredential',
+      unsupported: 'cliMcpReasonUnsupported',
+    };
+    const cliGovernancePanel = ({ mcp, pluginSkills }: any) => {
+      const excluded: Array<{ serverName: string; reason: string }> =
+        mcp?.excluded ?? [];
+      const skills: Array<{ plugin: string; skill: string }> =
+        pluginSkills ?? [];
+      const mcpLine =
+        mcp?.state === 'component-off'
+          ? t('cliMcpManagerOff')
+          : mcp?.state === 'unreadable'
+            ? t('cliMcpManagerUnreadable')
+            : t('cliMcpGiven').replace(
+                '{count}',
+                String(mcp?.included?.length ?? 0),
+              );
+      return h(
+        'div',
+        {
+          style: {
+            ...styles.statusLine,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+          },
+          'data-waycraft-cli-governance': true,
+        },
+        h('strong', null, t('cliGovernanceTitle')),
+        h(
+          'p',
+          {
+            style: { margin: 0 },
+            'data-waycraft-cli-mcp-included': mcp?.state ?? '',
+          },
+          mcpLine,
+        ),
+        excluded.length
+          ? h(
+              'div',
+              null,
+              h('p', { style: { margin: 0 } }, t('cliMcpExcludedTitle')),
+              h(
+                'ul',
+                { style: { margin: 0, paddingInlineStart: 20 } },
+                ...excluded.map((entry) =>
+                  h(
+                    'li',
+                    {
+                      key: entry.serverName,
+                      'data-waycraft-cli-mcp-excluded': entry.serverName,
+                    },
+                    h('bdi', null, entry.serverName),
+                    ' — ',
+                    t(
+                      MCP_REASON_KEYS[entry.reason] ??
+                        'cliMcpReasonUnsupported',
+                    ),
+                  ),
+                ),
+              ),
+            )
+          : null,
+        skills.length
+          ? h(
+              'div',
+              null,
+              h('p', { style: { margin: 0 } }, t('cliPluginSkillsNote')),
+              h(
+                'ul',
+                { style: { margin: 0, paddingInlineStart: 20 } },
+                ...skills.map((entry) =>
+                  h(
+                    'li',
+                    {
+                      key: `${entry.plugin}/${entry.skill}`,
+                      'data-waycraft-cli-plugin-skill': entry.skill,
+                    },
+                    h('bdi', null, entry.plugin),
+                    ' / ',
+                    h('bdi', null, entry.skill),
+                  ),
+                ),
+              ),
+            )
+          : null,
+      );
+    };
     const name = status?.displayName || DEFAULT_NAME;
     const hasAccounts = !!status?.accounts?.length;
     return h(
@@ -368,13 +483,46 @@ export function createClaudeCard(
             },
           })
         : null,
-      status?.cliSettings && expanded ? h('div', { style: styles.statusLine },
-        ...(['cliMaxConcurrent'] as const).map((key) => h('label', { key }, t(key), h(Input, {
-          type: 'number', min: 1, max: 1440, value: status.cliSettings[key],
-          'aria-label': t(key), disabled: pending,
-          onChange: (event: any) => { const value = Number(event.target.value); if (!Number.isSafeInteger(value) || value < 1 || value > 1440) return; void action(async () => { await call('setProviderSettings', { original: { [key]: status.cliSettings[key] }, settings: { [key]: value } }); await refreshStatus(); }); },
-        }))),
-      ) : null,
+      status?.cliSettings && expanded
+        ? h(
+            'div',
+            { style: styles.statusLine },
+            ...(['cliMaxConcurrent'] as const).map((key) =>
+              h(
+                'label',
+                { key },
+                t(key),
+                h(Input, {
+                  type: 'number',
+                  min: 1,
+                  max: 1440,
+                  value: status.cliSettings[key],
+                  'aria-label': t(key),
+                  disabled: pending,
+                  onChange: (event: any) => {
+                    const value = Number(event.target.value);
+                    if (
+                      !Number.isSafeInteger(value) ||
+                      value < 1 ||
+                      value > 1440
+                    )
+                      return;
+                    void action(async () => {
+                      await call('setProviderSettings', {
+                        original: { [key]: status.cliSettings[key] },
+                        settings: { [key]: value },
+                      });
+                      await refreshStatus();
+                    });
+                  },
+                }),
+              ),
+            ),
+          )
+        : null,
+      status?.cliGovernance && expanded
+        ? cliGovernancePanel(status.cliGovernance)
+        : null,
       part(
         'card',
         styles.card,
@@ -525,7 +673,8 @@ export function createClaudeCard(
                     h('bdi', null, account.cliVersion),
                   )
                 : null,
-              account.accessMethod === 'official-cli' && status?.cli?.updateRequired
+              account.accessMethod === 'official-cli' &&
+                status?.cli?.updateRequired
                 ? updateNotice(status.cli, 'data-waycraft-cli-update')
                 : null,
               account.accessMethod === 'official-cli'
@@ -796,7 +945,11 @@ export function createClaudeCard(
           ? h(
               'div',
               { role: 'status', style: styles.statusLine },
-              t(cliInstallation.updateRequired ? 'cliUpdateRequired' : 'claudeCliMissing'),
+              t(
+                cliInstallation.updateRequired
+                  ? 'cliUpdateRequired'
+                  : 'claudeCliMissing',
+              ),
               h(
                 'pre',
                 {

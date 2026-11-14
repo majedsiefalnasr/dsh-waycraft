@@ -1,5 +1,9 @@
 # Current work
 
+## Ticket #186 — 2026-11-14
+
+Implementation and verification complete on `feat/186-cli-skill-mcp-governance`, based on `8b57465` of `feat/179-access-methods`. Owner authorized verification/closure and mechanical formatting of existing files. Quality (format, lint, three typecheck projects), build, 1574 tests, and fresh-build comparison pass. Independent Standards/Spec review found one cancellation cleanup race, fixed and regression-tested. Follow-up #211 under #179 tracks credential resolution and is not implemented. Integration and tracker closure authorized next; no installed/live CLI verification, push, main merge or release. See [evidence](ticket-186-implementation.md).
+
 ## Ticket #185 — 2026-11-13 (completed)
 
 Completed #185 only: Claude Official CLI turns can call `get_goal`, `create_goal`, `update_goal` and `web_search` through a per-turn loopback HTTP MCP server (random port, bearer token only in a `0600` config file, exact Host, no Origin, constant-time token check, closed and removed when the turn ends, is aborted or fails), executed through DSH's `ToolRuntime` with the session's agent; the CLI runs with `--strict-mcp-config`. Title, summary and compaction requests run with every tool disabled, one turn and no MCP server. DSH's subagent, wait and job tools are deliberately not offered (the CLI uses its own subagents); the allowlist and limit are in Provider capabilities and on #185. MCP manager reading is #186 and was not touched. Final gates: build, typecheck, lint, all 1544 tests, `check:build` and `git diff --check` passed; independent Standards/Spec review findings were fixed or recorded as accepted. No real CLI or installed DSH was exercised. Live items for #195: real MCP connection and tool listing, DSH's real approval dialog for a tool call, and a possible second prompt from the CLI's own permission check. See [implementation evidence](ticket-185-implementation.md).

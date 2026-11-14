@@ -8,9 +8,8 @@
  * #168: explicit connection testing/status reporting (trust-gated).
  * #169: read-only tool enumeration/cache with freshness (explicit only, no eager connections).
  */
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { McpCordisConfigStore } from './mcp-config-store.js';
+import { McpCordisConfigStore, resolveCordisPatchPath, } from './mcp-config-store.js';
+import { registerMcpManager } from './cli-governance.js';
 import { testMcpConnection } from './mcp-connection-test.js';
 import { sanitizeMcpObservable } from './mcp-credentials.js';
 import { assertTrustApprovedForAction } from './mcp-trust.js';
@@ -55,13 +54,6 @@ function isOwnerRequest(request) {
     }
     return true;
 }
-function resolveCordisPatchPath() {
-    if (process.env.DSH_CORDIS_PATCH_PATH)
-        return process.env.DSH_CORDIS_PATCH_PATH;
-    const home = process.env.DSH_HOME || join(homedir(), '.dsh');
-    const profile = process.env.DSH_PROFILE || 'desktop';
-    return join(home, 'profiles', profile, 'cordis.patch.yml');
-}
 function mapPersistenceStatus(code) {
     switch (code) {
         case 'validation':
@@ -97,6 +89,8 @@ export function apply(ctx, config = {}) {
             ? config.configPath
             : resolveCordisPatchPath();
         const store = new McpCordisConfigStore({ configPath });
+        // While this component is on, Official CLI sessions read the same saved configuration (read-only) at each turn.
+        const unregisterForCli = registerMcpManager({ configPath });
         const toolCache = new McpToolCacheStore(resolveMcpToolCachePath({ configPath }));
         const dispose = connection.fetch.register({
             path: MCP_ROUTE,
@@ -598,9 +592,13 @@ export function apply(ctx, config = {}) {
                 return reject(400, 'Unknown action');
             },
         });
+        const release = () => {
+            unregisterForCli();
+            dispose();
+        };
         if (typeof ctx.on === 'function')
-            ctx.on('dispose', dispose);
+            ctx.on('dispose', release);
         else if (typeof ctx.effect === 'function')
-            ctx.effect(() => dispose);
+            ctx.effect(() => release);
     });
 }

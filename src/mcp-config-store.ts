@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { parseDocument } from 'yaml';
 import {
   type McpServerConfig,
@@ -22,6 +23,15 @@ import {
 } from './mcp-trust.js';
 
 const MCP_CLIENT_NAME = '@deepseek-ai/dsh-mcp-client';
+
+/** The profile's `cordis.patch.yml`, where the MCP manager keeps its servers. One answer for every reader. */
+export function resolveCordisPatchPath(): string {
+  if (process.env.DSH_CORDIS_PATCH_PATH)
+    return process.env.DSH_CORDIS_PATCH_PATH;
+  const home = process.env.DSH_HOME || join(homedir(), '.dsh');
+  const profile = process.env.DSH_PROFILE || 'desktop';
+  return join(home, 'profiles', profile, 'cordis.patch.yml');
+}
 
 export type McpServerOwnership =
   | 'preexisting-dsh'

@@ -7043,6 +7043,20 @@ var subscriptions$1 = {
 	"cliLoginFailed": "CLI sign-in could not be verified. Review the terminal output, cancel this attempt, then try again.",
 	"cliAccountControlsPending": "Official CLI account removal will be available in a later update.",
 	"cliMaxConcurrent": "Concurrent CLI turns per account",
+	"cliGovernanceTitle": "MCP servers and skills in Official CLI sessions",
+	"cliMcpGiven": "MCP manager servers given to Official CLI sessions: {count}. Servers set up only in the CLI itself are never used.",
+	"cliMcpManagerOff": "The MCP manager is off, so none of its servers are given to Official CLI sessions.",
+	"cliMcpManagerUnreadable": "The MCP manager's configuration cannot be read, so none of its servers are available in Official CLI sessions until it can.",
+	"cliMcpExcludedTitle": "Left out of Official CLI sessions",
+	"cliMcpReasonDisabled": "switched off in the MCP manager",
+	"cliMcpReasonUntrusted": "not trusted yet",
+	"cliMcpReasonChanged": "changed since it was trusted",
+	"cliMcpReasonNeedsCredential": "needs a credential, which Official CLI sessions cannot use yet",
+	"cliMcpReasonUnsupported": "its configuration has no equivalent in the CLI",
+	"cliPluginSkillsNote": "These skills come with a CLI plugin, so they follow the plugin and cannot be switched off one by one in the Skill manager:",
+	"cliGovernanceNoticeTitle": "MCP manager servers are unavailable in this session",
+	"cliGovernanceNoticeBody": "The MCP manager's configuration cannot be read, so its servers are not available in this session. Servers set up only in the CLI itself are never used.",
+	"cliGovernanceNoticeDismiss": "Dismiss",
 	"cliTerminalInput": "CLI terminal input (Enter to send)",
 	"officialCli": "Official CLI",
 	"cliApiKeysRemoved": "Provider API-key variables (such as ANTHROPIC_API_KEY) are removed from the CLI's environment, so runs use this account's subscription.",
@@ -7729,6 +7743,20 @@ var subscriptions = {
 	"cliLoginFailed": "تعذّر التحقق من تسجيل الدخول. راجع مخرجات الطرفية، ثم ألغِ هذه المحاولة وأعد المحاولة.",
 	"cliAccountControlsPending": "ستتوفر إزالة حساب واجهة CLI الرسمية في تحديث لاحق.",
 	"cliMaxConcurrent": "عدد أدوار CLI المتزامنة لكل حساب",
+	"cliGovernanceTitle": "خوادم MCP والمهارات في جلسات Official CLI",
+	"cliMcpGiven": "عدد خوادم مدير MCP الممنوحة لجلسات Official CLI: {count}. الخوادم المعدّة داخل الـ CLI فقط لا تُستخدم أبدًا.",
+	"cliMcpManagerOff": "مدير MCP متوقف، لذلك لا تُمنح أي من خوادمه لجلسات Official CLI.",
+	"cliMcpManagerUnreadable": "تعذّرت قراءة إعداد مدير MCP، لذلك لا تتوفر خوادمه في جلسات Official CLI إلى أن يمكن قراءته.",
+	"cliMcpExcludedTitle": "مستبعدة من جلسات Official CLI",
+	"cliMcpReasonDisabled": "مُعطّل في مدير MCP",
+	"cliMcpReasonUntrusted": "لم يُعتمد بعد",
+	"cliMcpReasonChanged": "تغيّر بعد اعتماده",
+	"cliMcpReasonNeedsCredential": "يحتاج إلى بيانات اعتماد لا تستطيع جلسات Official CLI استخدامها حاليًا",
+	"cliMcpReasonUnsupported": "إعداده ليس له مقابل في الـ CLI",
+	"cliPluginSkillsNote": "هذه المهارات تأتي مع إضافة CLI، لذلك تتبع الإضافة ولا يمكن إيقافها واحدة واحدة من مدير المهارات:",
+	"cliGovernanceNoticeTitle": "خوادم مدير MCP غير متاحة في هذه الجلسة",
+	"cliGovernanceNoticeBody": "تعذّرت قراءة إعداد مدير MCP، لذلك خوادمه غير متاحة في هذه الجلسة. الخوادم المعدّة داخل الـ CLI فقط لا تُستخدم أبدًا.",
+	"cliGovernanceNoticeDismiss": "إغلاق",
 	"cliTerminalInput": "إدخال الطرفية (اضغط Enter للإرسال)",
 	"officialCli": "واجهة CLI الرسمية",
 	"cliApiKeysRemoved": "تُزال متغيرات مفاتيح API الخاصة بالمزود (مثل ANTHROPIC_API_KEY) من بيئة CLI، فتعمل الطلبات باشتراك هذا الحساب.",
@@ -11216,6 +11244,42 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 			busy,
 			login?.loginId
 		]);
+		const MCP_REASON_KEYS = {
+			disabled: "cliMcpReasonDisabled",
+			untrusted: "cliMcpReasonUntrusted",
+			changed: "cliMcpReasonChanged",
+			"needs-credential": "cliMcpReasonNeedsCredential",
+			unsupported: "cliMcpReasonUnsupported"
+		};
+		const cliGovernancePanel = ({ mcp, pluginSkills }) => {
+			const excluded = mcp?.excluded ?? [];
+			const skills = pluginSkills ?? [];
+			const mcpLine = mcp?.state === "component-off" ? t("cliMcpManagerOff") : mcp?.state === "unreadable" ? t("cliMcpManagerUnreadable") : t("cliMcpGiven").replace("{count}", String(mcp?.included?.length ?? 0));
+			return h("div", {
+				style: {
+					...styles$3.statusLine,
+					display: "flex",
+					flexDirection: "column",
+					gap: 4
+				},
+				"data-waycraft-cli-governance": true
+			}, h("strong", null, t("cliGovernanceTitle")), h("p", {
+				style: { margin: 0 },
+				"data-waycraft-cli-mcp-included": mcp?.state ?? ""
+			}, mcpLine), excluded.length ? h("div", null, h("p", { style: { margin: 0 } }, t("cliMcpExcludedTitle")), h("ul", { style: {
+				margin: 0,
+				paddingInlineStart: 20
+			} }, ...excluded.map((entry) => h("li", {
+				key: entry.serverName,
+				"data-waycraft-cli-mcp-excluded": entry.serverName
+			}, h("bdi", null, entry.serverName), " — ", t(MCP_REASON_KEYS[entry.reason] ?? "cliMcpReasonUnsupported"))))) : null, skills.length ? h("div", null, h("p", { style: { margin: 0 } }, t("cliPluginSkillsNote")), h("ul", { style: {
+				margin: 0,
+				paddingInlineStart: 20
+			} }, ...skills.map((entry) => h("li", {
+				key: `${entry.plugin}/${entry.skill}`,
+				"data-waycraft-cli-plugin-skill": entry.skill
+			}, h("bdi", null, entry.plugin), " / ", h("bdi", null, entry.skill))))) : null);
+		};
 		const name = status?.displayName || DEFAULT_NAME;
 		const hasAccounts = !!status?.accounts?.length;
 		return h("div", {
@@ -11257,7 +11321,7 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 					await refreshStatus();
 				});
 			}
-		})))) : null, part("card", styles$3.card, presentation !== "auth" && part("header", styles$3.cardHeader, providerStatus(h, t, error || status?.registrationError ? "error" : busy ? "warning" : !status ? "checking" : status?.accounts?.length ? "ready" : "warning", error || status?.registrationError ? "providerAttention" : busy ? "loginProgress" : !status ? "checking" : status?.accounts?.length ? "providerConfigured" : "notLoggedIn"), presentation === "group" ? providerIdentity(h, t, name, status?.accounts ?? [], usage, status?.clientVersion) : h("span", { style: styles$3.name }, name), presentation === "auth" ? null : button(t("accountsManage"), () => setManager(true), false, { style: { marginInlineStart: "auto" } }), presentation === "group" ? providerDisclosure(h, t, name, expanded, () => setExpanded(!expanded)) : status?.clientVersion ? h("span", {
+		})))) : null, status?.cliGovernance && expanded ? cliGovernancePanel(status.cliGovernance) : null, part("card", styles$3.card, presentation !== "auth" && part("header", styles$3.cardHeader, providerStatus(h, t, error || status?.registrationError ? "error" : busy ? "warning" : !status ? "checking" : status?.accounts?.length ? "ready" : "warning", error || status?.registrationError ? "providerAttention" : busy ? "loginProgress" : !status ? "checking" : status?.accounts?.length ? "providerConfigured" : "notLoggedIn"), presentation === "group" ? providerIdentity(h, t, name, status?.accounts ?? [], usage, status?.clientVersion) : h("span", { style: styles$3.name }, name), presentation === "auth" ? null : button(t("accountsManage"), () => setManager(true), false, { style: { marginInlineStart: "auto" } }), presentation === "group" ? providerDisclosure(h, t, name, expanded, () => setExpanded(!expanded)) : status?.clientVersion ? h("span", {
 			style: styles$3.clientVersion,
 			title: t("clientVersionHint")
 		}, "CLI ", h("bdi", { dir: "ltr" }, status.clientVersion.version), " · ", t(`source_${status.clientVersion.source}`)) : null), (presentation === "auth" || presentation === "group" && status?.accounts?.length) && !busy && !status?.registrationError ? null : h("p", {
@@ -11451,7 +11515,7 @@ function createClaudeCard(React, primitives$1, rpc, t) {
 * that opens the add-account flow on Official CLI. Independently implemented; no reference source.
 */
 /** How often the card asks the host whether its session was refused (a cheap in-memory lookup). */
-const POLL_MS = 3e3;
+const POLL_MS$1 = 3e3;
 function createExtraUsageNotice(React, primitives$1, AddAccount) {
 	const h = React.createElement;
 	const Button = primitives$1.Button ?? "button";
@@ -11526,7 +11590,7 @@ function createExtraUsageNotice(React, primitives$1, AddAccount) {
 						revision: answer.value.revision
 					} : null);
 				} catch {} finally {
-					if (alive) timer = setTimeout(() => void read(), POLL_MS);
+					if (alive) timer = setTimeout(() => void read(), POLL_MS$1);
 				}
 			};
 			read();
@@ -11576,6 +11640,87 @@ function createExtraUsageNotice(React, primitives$1, AddAccount) {
 				close();
 			}
 		})) : null);
+	};
+}
+
+//#endregion
+//#region src/cli-governance-notice.ts
+/**
+* Session card for an Official CLI turn that ran without the MCP manager's servers because its saved configuration
+* could not be read (#186). The host records the condition once per session and answers `cliGovernanceNotice`; this
+* card shows it until the Owner dismisses it, and shows it again only for a new revision (a later failure after the
+* configuration was readable again). It carries no server name and no configuration value.
+*/
+/** How often the card asks the host whether its session has the notice (a cheap in-memory lookup). */
+const POLL_MS = 3e3;
+function createCliGovernanceNotice(React, primitives$1) {
+	const h = React.createElement;
+	const Button = primitives$1.Button ?? "button";
+	const styles$7 = {
+		card: {
+			display: "flex",
+			flexDirection: "column",
+			gap: 8,
+			padding: "12px 16px",
+			border: "0.5px solid var(--dsw-alias-border-l2)",
+			borderRadius: "var(--dsw-radius-xl,20px)",
+			background: "var(--dsw-alias-bg-layer-2)",
+			textAlign: "start",
+			minInlineSize: 0
+		},
+		title: {
+			margin: 0,
+			fontSize: 14,
+			lineHeight: "20px",
+			fontWeight: 500
+		},
+		body: {
+			margin: 0,
+			fontSize: 13,
+			lineHeight: "20px",
+			color: "var(--dsw-alias-label-secondary)",
+			overflowWrap: "anywhere"
+		}
+	};
+	return function CliGovernanceNotice({ rpc, sessionId, t }) {
+		const [notice, setNotice] = React.useState(null);
+		const [dismissed, setDismissed] = React.useState(null);
+		React.useEffect(() => {
+			let alive = true;
+			let timer;
+			setNotice(null);
+			setDismissed(null);
+			const read = async () => {
+				try {
+					const answer = await rpc.call("/api", "waycraft-subscriptions.cliGovernanceNotice", {
+						provider: "claude",
+						sessionId
+					});
+					if (!alive) return;
+					setNotice(answer?.ok === true && answer.value?.active === true ? {
+						sessionId,
+						revision: answer.value.revision
+					} : null);
+				} catch {} finally {
+					if (alive) timer = setTimeout(() => void read(), POLL_MS);
+				}
+			};
+			read();
+			return () => {
+				alive = false;
+				clearTimeout(timer);
+			};
+		}, [sessionId, rpc]);
+		if (!notice || notice.sessionId !== sessionId || notice.revision === dismissed) return null;
+		return h("section", {
+			role: "status",
+			style: styles$7.card,
+			"data-waycraft-cli-governance-notice": true
+		}, h("h4", { style: styles$7.title }, t("cliGovernanceNoticeTitle")), h("p", { style: styles$7.body }, t("cliGovernanceNoticeBody")), h(Button, {
+			type: "button",
+			"data-waycraft-cli-governance-dismiss": true,
+			onClick: () => setDismissed(notice.revision)
+		}, t("cliGovernanceNoticeDismiss")));
 	};
 }
 
@@ -13613,6 +13758,7 @@ function applySubscriptions(root) {
 		const GuardedSpeed = guarded(React, SpeedSelect, "Speed control");
 		const GuardedBadge = guarded(React, SubscriptionUsageBadge, "usage badge");
 		const ExtraUsageNotice = guarded(React, createExtraUsageNotice(React, primitives$1, ClaudeCard), "extra-usage notice");
+		const CliGovernanceNotice = guarded(React, createCliGovernanceNotice(React, primitives$1), "CLI governance notice");
 		const listeners = /* @__PURE__ */ new Set();
 		let ApiProviders;
 		const SubscriptionProviders = createApiProviders(React, null, t, primitives$1);
@@ -13876,6 +14022,16 @@ function applySubscriptions(root) {
 						sessionId
 					})
 				}, ExtraUsageNotice)));
+				add(() => ctx.slots.inject("conversation.composer.dock", () => ctx.slots.register({
+					name: "conversation.composer.dock",
+					id: "waycraft-cli-governance-notice",
+					order: 6,
+					locale: NS$1,
+					inject: (sessionId) => ({
+						rpc: connection.rpc,
+						sessionId
+					})
+				}, CliGovernanceNotice)));
 			} else if (!surfaceWanted() && surfacesActive) {
 				surfacesActive = false;
 				for (const off of surfaces.splice(0)) isolate(off);

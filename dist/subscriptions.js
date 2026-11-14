@@ -34,7 +34,8 @@ import { subscriptionAccountKey } from './providers/account-kind.js';
 import { AccountPreferencesAdapter, accountAllowsPool, accountModelId, parseAccountModelId, } from './providers/account-preferences.js';
 import { planReviewTextFor } from './auth/claude-cli-plan-text.js';
 import { CLAUDE_CAPABILITIES } from './provider-capabilities.js';
-import { ClaudeCliLogin, discoverClaudeCli, } from './auth/claude-cli.js';
+import { ClaudeCliLogin, claudeStorage, discoverClaudeCli, } from './auth/claude-cli.js';
+import { readManagerMcp, readPluginSkills, } from './auth/claude-cli-governance.js';
 import { ClaudeAuthController, } from './auth/claude-controller.js';
 import { readClaudeCodeCredentials, recordClaudeEmail, refreshClaudeSynced, SYSTEM_CLAUDE_CREDS_IO, } from './auth/claude-code-creds.js';
 import { ClaudeAdapter, CLAUDE_PREEMPT_MS, fetchClaudeProfile, fetchClaudeUsage, isClaudePermanentRefreshError, refreshClaude, } from './providers/claude.js';
@@ -212,6 +213,7 @@ function readLoginMethod(payload, provider) {
 /** Endpoints that serve Claude; every other endpoint (speed, reset, proxy, image, video) stays Codex-only. */
 const CLAUDE_ENDPOINTS = new Set([
     'extraUsageNotice',
+    'cliGovernanceNotice',
     'cliDiscover',
     'cliInput',
     'cliRead',
@@ -537,6 +539,14 @@ export function apply(ctx, config = {}, options = {}) {
         claudeCliProbe = { at: Date.now(), value };
         return value;
     };
+    /** What the managers give an Official CLI session, for the manage page: names and reasons, never a value. */
+    const claudeCliGovernance = async () => {
+        const { state, included, excluded } = await readManagerMcp();
+        return {
+            mcp: { state, included, excluded },
+            pluginSkills: await readPluginSkills(claudeStorage('settings')),
+        };
+    };
     const claudeAuth = new ClaudeAuthController(flows, claudeChanged, (error) => browserSafeError(error, 'claude login'), () => readClaudeCodeCredentials(claudeCredsIo), (session) => recordClaudeEmail(session, claudeIdentity, claudeLifecycle.signal));
     const resets = new ResetRedemption(readUsage, async (account, credit, request, signal) => consumeCodexResetCredit(await tokens.session(account), credit, request, proxiedFetch, signal), (account) => usage.invalidate('codex', account));
     adapter = new CodexAdapter({
@@ -604,6 +614,9 @@ export function apply(ctx, config = {}, options = {}) {
         ];
     const extraUsageSessions = new Map();
     let extraUsageRevision = 0;
+    // A session whose MCP manager configuration could not be read is told once; reading it again clears the flag.
+    const managerNotices = new Map();
+    let managerNoticeRevision = 0;
     const claudeAdapter = new ClaudeAdapter({
         onExtraUsage: (sessionId) => {
             // Re-insert to retain recency; a revision distinguishes consecutive refusals after dismissal.
@@ -618,6 +631,21 @@ export function apply(ctx, config = {}, options = {}) {
         },
         onTurnAccepted: (sessionId) => {
             extraUsageSessions.delete(sessionId);
+        },
+        onManagerMcp: (sessionId, state) => {
+            if (sessionId === undefined)
+                return;
+            if (state !== 'unreadable')
+                managerNotices.delete(sessionId);
+            else if (!managerNotices.has(sessionId)) {
+                managerNotices.set(sessionId, ++managerNoticeRevision);
+                while (managerNotices.size > SPEED_SESSIONS_MAX) {
+                    const oldest = managerNotices.keys().next().value;
+                    if (oldest === undefined)
+                        break;
+                    managerNotices.delete(oldest);
+                }
+            }
         },
         tokens: claudeTokens,
         cliRuntime,
@@ -731,16 +759,24 @@ export function apply(ctx, config = {}, options = {}) {
         settings: preferences,
         accounts: async () => {
             const direct = (await claudeTokens.list()).map(({ key, session }) => ({
-                accessMethod: 'direct', key: subscriptionAccountKey('direct', key), label: session.emailAddress ?? key, session,
+                accessMethod: 'direct',
+                key: subscriptionAccountKey('direct', key),
+                label: session.emailAddress ?? key,
+                session,
             }));
             const cli = (await claudeCliLogin.accounts()).map((account) => ({
-                accessMethod: 'official-cli', key: subscriptionAccountKey('official-cli', account.key), label: account.emailAddress ?? account.key,
+                accessMethod: 'official-cli',
+                key: subscriptionAccountKey('official-cli', account.key),
+                label: account.emailAddress ?? account.key,
             }));
             const all = [...direct, ...cli];
             const preferred = preferences.get('claude').defaultAccount;
             const legacy = direct[0]?.key;
             const first = preferred ?? legacy;
-            return [...all.filter((account) => account.key === first), ...all.filter((account) => account.key !== first)];
+            return [
+                ...all.filter((account) => account.key === first),
+                ...all.filter((account) => account.key !== first),
+            ];
         },
         pool: () => pool,
     });
@@ -1049,6 +1085,7 @@ export function apply(ctx, config = {}, options = {}) {
             'image',
             'video',
             'extraUsageNotice',
+            'cliGovernanceNotice',
             'cliDiscover',
             'cliInput',
             'cliRead',
@@ -1169,6 +1206,20 @@ export function apply(ctx, config = {}, options = {}) {
                                         : { active: true, revision };
                                 break;
                             }
+                            case 'cliGovernanceNotice': {
+                                if (provider !== 'claude')
+                                    throw new Error('The CLI governance notice is only available for Claude');
+                                const revision = managerNotices.get(string('sessionId'));
+                                value =
+                                    revision === undefined
+                                        ? { active: false }
+                                        : {
+                                            active: true,
+                                            kind: 'manager-config-unreadable',
+                                            revision,
+                                        };
+                                break;
+                            }
                             case 'cliRead': {
                                 if (provider !== 'claude')
                                     throw new Error('Official CLI terminal is only available for Claude');
@@ -1278,21 +1329,34 @@ export function apply(ctx, config = {}, options = {}) {
                                                     ...claudeState,
                                                     capabilities: CLAUDE_CAPABILITIES,
                                                     ...((await claudeCliLogin.accounts()).length
-                                                        ? { cli: await claudeCliStatus() }
+                                                        ? {
+                                                            cli: await claudeCliStatus(),
+                                                            cliGovernance: await claudeCliGovernance(),
+                                                        }
                                                         : {}),
-                                                    cliSettings: { cliMaxConcurrent: preferences.get('claude').cliMaxConcurrent ?? 4 },
+                                                    cliSettings: {
+                                                        cliMaxConcurrent: preferences.get('claude')
+                                                            .cliMaxConcurrent ?? 4,
+                                                    },
                                                     displayName: preferences.get('claude').displayName,
                                                     accounts: [
                                                         ...claudeState.accounts.map((account) => ({
                                                             ...account,
                                                             accessMethod: 'direct',
-                                                            isDefault: preferences.get('claude').defaultAccount ? preferences.get('claude').defaultAccount === subscriptionAccountKey('direct', account.key) : account.isDefault,
+                                                            isDefault: preferences.get('claude')
+                                                                .defaultAccount
+                                                                ? preferences.get('claude')
+                                                                    .defaultAccount ===
+                                                                    subscriptionAccountKey('direct', account.key)
+                                                                : account.isDefault,
                                                             alias: ownAlias('claude', account.key),
                                                         })),
                                                         ...(await claudeCliLogin.accounts()).map((account) => ({
                                                             ...account,
                                                             key: subscriptionAccountKey('official-cli', account.key),
-                                                            isDefault: preferences.get('claude').defaultAccount === subscriptionAccountKey('official-cli', account.key),
+                                                            isDefault: preferences.get('claude')
+                                                                .defaultAccount ===
+                                                                subscriptionAccountKey('official-cli', account.key),
                                                             alias: ownAlias('claude', account.key),
                                                         })),
                                                     ],
@@ -1686,13 +1750,25 @@ export function apply(ctx, config = {}, options = {}) {
                                 else if (provider === 'claude') {
                                     const requested = string('account');
                                     const accounts = [
-                                        ...(await claudeTokens.list()).map(({ key }) => ({ accessMethod: 'direct', key: subscriptionAccountKey('direct', key) })),
-                                        ...(await claudeCliLogin.accounts()).map(({ key }) => ({ accessMethod: 'official-cli', key: subscriptionAccountKey('official-cli', key) })),
+                                        ...(await claudeTokens.list()).map(({ key }) => ({
+                                            accessMethod: 'direct',
+                                            key: subscriptionAccountKey('direct', key),
+                                        })),
+                                        ...(await claudeCliLogin.accounts()).map(({ key }) => ({
+                                            accessMethod: 'official-cli',
+                                            key: subscriptionAccountKey('official-cli', key),
+                                        })),
                                     ];
-                                    const selected = accounts.find((account) => account.key === requested || (account.accessMethod === 'direct' && account.key === subscriptionAccountKey('direct', requested)));
+                                    const selected = accounts.find((account) => account.key === requested ||
+                                        (account.accessMethod === 'direct' &&
+                                            account.key ===
+                                                subscriptionAccountKey('direct', requested)));
                                     if (!selected)
                                         throw new Error('Claude account unavailable');
-                                    await preferences.set('claude', { ...preferences.get('claude'), defaultAccount: selected.key });
+                                    await preferences.set('claude', {
+                                        ...preferences.get('claude'),
+                                        defaultAccount: selected.key,
+                                    });
                                 }
                                 else
                                     await auth.setDefault(string('account'));

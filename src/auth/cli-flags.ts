@@ -6,9 +6,9 @@
 /** Every `--long-flag` named on a help page, or `undefined` when the text names none (so it is not a help page). */
 export function parseHelpFlags(help: string): Set<string> | undefined {
   const flags = new Set(
-    [...help.matchAll(/(?:^|[\s,|[(])(--[a-z][a-z0-9]*(?:-[a-z0-9]+)*)/gim)].map(
-      (match) => match[1]!.toLowerCase(),
-    ),
+    [
+      ...help.matchAll(/(?:^|[\s,|[(])(--[a-z][a-z0-9]*(?:-[a-z0-9]+)*)/gim),
+    ].map((match) => match[1]!.toLowerCase()),
   );
   return flags.size ? flags : undefined;
 }

@@ -576,7 +576,10 @@ for (const provider of ['codex', 'claude', 'grok', 'antigravity', 'copilot']) {
           'existing group refreshes without remount',
         );
         assert.equal(
-          f.group()[0].findAllByType('input').filter((node) => node.props.type !== 'number').length,
+          f
+            .group()[0]
+            .findAllByType('input')
+            .filter((node) => node.props.type !== 'number').length,
           0,
           'callback exists only in Add',
         );

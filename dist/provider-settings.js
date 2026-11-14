@@ -114,7 +114,11 @@ export function validatePreferences(provider, input) {
         const value = raw[key];
         if (value === undefined)
             continue;
-        if (provider !== 'claude' || typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > 1440)
+        if (provider !== 'claude' ||
+            typeof value !== 'number' ||
+            !Number.isSafeInteger(value) ||
+            value < 1 ||
+            value > 1440)
             throw new Error(`${key} must be a positive integer no greater than 1440 for Claude`);
         result[key] = value;
     }

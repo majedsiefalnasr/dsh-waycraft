@@ -273,8 +273,14 @@ test('Official CLI verifies successful login through scoped auth status and retu
     assert.equal(accounts.length, 1);
     assert.equal(accounts[0].accessMethod, 'official-cli');
     assert.equal(accounts[0].key, `official-cli:${login.loginId}`);
-    await h.call('setDefault', { provider: 'claude', account: accounts[0].key });
-    assert.equal((await h.call('status')).value.providers.claude.accounts[0].isDefault, true);
+    await h.call('setDefault', {
+      provider: 'claude',
+      account: accounts[0].key,
+    });
+    assert.equal(
+      (await h.call('status')).value.providers.claude.accounts[0].isDefault,
+      true,
+    );
     assert.equal(accounts[0].emailAddress, 'cli@example.com');
     await h.call('cliCancel', { provider: 'claude', loginId: login.loginId });
     const next = (
@@ -1166,7 +1172,9 @@ const versionRuntime = (version, spawned = []) => ({
     spawned.push(request);
     return {
       done: Promise.resolve({ exitCode: 0, signal: null }),
-      collected: { stdout: { readFrom: () => ({ text: version, lossy: false }) } },
+      collected: {
+        stdout: { readFrom: () => ({ text: version, lossy: false }) },
+      },
       async terminate() {},
       async waitForExit() {},
     };
@@ -1180,7 +1188,10 @@ test('Official CLI login on a CLI older than the provider minimum offers the upd
   await home('cli-login-outdated');
   const h = host({ io: fakeIo({}).io, subprocess: versionRuntime('1.9.4') });
   try {
-    const result = await h.call('login', { provider: 'claude', method: 'official-cli' });
+    const result = await h.call('login', {
+      provider: 'claude',
+      method: 'official-cli',
+    });
     assert.equal(result.ok, true);
     assert.equal(result.value.available, false);
     assert.equal(result.value.updateRequired, true);
@@ -1193,18 +1204,35 @@ test('Official CLI login on a CLI older than the provider minimum offers the upd
 });
 
 test('Claude status reports the installed CLI against the provider minimum for the account card', async () => {
-  for (const [name, version, updateRequired] of [['cli-status-old', '1.9.4', true], ['cli-status-new', '2.1.322', false]]) {
+  for (const [name, version, updateRequired] of [
+    ['cli-status-old', '1.9.4', true],
+    ['cli-status-new', '2.1.322', false],
+  ]) {
     const root = await home(name);
     const owned = join(root, 'plugins/waycraft/subscriptions/claude');
     await mkdir(owned, { recursive: true });
     await writeFile(
       join(owned, 'accounts.json'),
-      JSON.stringify({ accounts: { '11111111-1111-4111-8111-111111111111': { accessMethod: 'official-cli', email: 'fixture@example.test', cliVersion: '2.1.322' } } }),
+      JSON.stringify({
+        accounts: {
+          '11111111-1111-4111-8111-111111111111': {
+            accessMethod: 'official-cli',
+            email: 'fixture@example.test',
+            cliVersion: '2.1.322',
+          },
+        },
+      }),
     );
     const h = host({ io: fakeIo({}).io, subprocess: versionRuntime(version) });
     try {
       const { cli } = (await h.call('status')).value.providers.claude;
-      assert.deepEqual(cli, { version, minimumVersion: '2.0.0', updateRequired, updateCommand: 'claude update', source: 'https://code.claude.com/docs/en/setup' });
+      assert.deepEqual(cli, {
+        version,
+        minimumVersion: '2.0.0',
+        updateRequired,
+        updateCommand: 'claude update',
+        source: 'https://code.claude.com/docs/en/setup',
+      });
     } finally {
       await h.dispose();
     }
