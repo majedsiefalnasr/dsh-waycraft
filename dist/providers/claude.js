@@ -6,10 +6,11 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
-import { claudeCliMissingFlagMessage, claudeCliUpdateMessage, discoverClaudeCli, prepareClaudeCliAccountDirectory, probeClaudeCliFlags, SCRUBBED_ENV } from '../auth/claude-cli.js';
-import { answerControlRequest, approvalsDisabled, controlErrorLine, controlResponseLine, permissionModeFor } from '../auth/claude-cli-control.js';
+import { claudeCliMissingFlagMessage, claudeCliUpdateMessage, discoverClaudeCli, prepareClaudeCliAccountDirectory, probeClaudeCliFlags, SCRUBBED_ENV, } from '../auth/claude-cli.js';
+import { answerControlRequest, approvalsDisabled, controlErrorLine, controlResponseLine, permissionModeFor, } from '../auth/claude-cli-control.js';
 import { planCliArguments, refusedFlag } from '../auth/cli-flags.js';
-import { createClaudeCliMcpRun, MCP_CONFIG_PLACEHOLDER } from '../auth/claude-cli-mcp.js';
+import { createClaudeCliMcpRun, MCP_CONFIG_PLACEHOLDER, } from '../auth/claude-cli-mcp.js';
+import { readHiddenSkills, readManagerMcp, skillSettingsArgument, } from '../auth/claude-cli-governance.js';
 import { translateClaudeCliStream } from '../translate/claude-cli.js';
 import { EMPTY_RESPONSE_CODE, errorChain, LlmAdapter, LlmError, ReasoningEffortId, } from '@deepseek-ai/dsh-llm';
 import { hostSupportsImageOffload, IMAGE_OFFLOAD_REQUIRED, requiredImageOffloadCount, resolveImages, } from '../translate/resolved.js';
@@ -713,17 +714,32 @@ export class ClaudeAdapter extends LlmAdapter {
     streamAccount(options, account) {
         if (account.startsWith('official-cli:'))
             return this.streamCliAccount(options, decodeURIComponent(account.slice('official-cli:'.length)));
-        return this.streamCore(options, account.startsWith('direct:') ? decodeURIComponent(account.slice('direct:'.length)) : account);
+        return this.streamCore(options, account.startsWith('direct:')
+            ? decodeURIComponent(account.slice('direct:'.length))
+            : account);
     }
     async *streamCliAccount(options, loginId) {
-        const queueSignal = options.signal ? AbortSignal.any([options.signal, this.cliQueueAbort.signal]) : this.cliQueueAbort.signal;
-        const cap = this.options.cliSettings?.().cliMaxConcurrent ?? this.options.cliMaxConcurrent ?? 4;
+        const queueSignal = options.signal
+            ? AbortSignal.any([options.signal, this.cliQueueAbort.signal])
+            : this.cliQueueAbort.signal;
+        const cap = this.options.cliSettings?.().cliMaxConcurrent ??
+            this.options.cliMaxConcurrent ??
+            4;
         while ((this.cliAdmission.get(loginId) ?? 0) >= cap) {
             queueSignal.throwIfAborted();
             await new Promise((resolve, reject) => {
-                const wake = () => { cleanup(); resolve(); };
-                const abort = () => { cleanup(); reject(queueSignal.reason); };
-                const cleanup = () => { this.cliWaiters.delete(wake); queueSignal.removeEventListener('abort', abort); };
+                const wake = () => {
+                    cleanup();
+                    resolve();
+                };
+                const abort = () => {
+                    cleanup();
+                    reject(queueSignal.reason);
+                };
+                const cleanup = () => {
+                    this.cliWaiters.delete(wake);
+                    queueSignal.removeEventListener('abort', abort);
+                };
                 this.cliWaiters.add(wake);
                 queueSignal.addEventListener('abort', abort, { once: true });
             });
@@ -731,7 +747,9 @@ export class ClaudeAdapter extends LlmAdapter {
         queueSignal.throwIfAborted();
         this.cliAdmission.set(loginId, (this.cliAdmission.get(loginId) ?? 0) + 1);
         let complete;
-        const operation = new Promise((resolve) => { complete = resolve; });
+        const operation = new Promise((resolve) => {
+            complete = resolve;
+        });
         this.cliOperations.add(operation);
         try {
             yield* this.runCliAccount(options, loginId);
@@ -748,7 +766,9 @@ export class ClaudeAdapter extends LlmAdapter {
         const runtime = this.options.cliRuntime?.();
         if (!runtime)
             throw new Error('Official CLI requires the DSH subprocess service');
-        const discovery = await discoverClaudeCli(runtime, options.signal ? AbortSignal.any([options.signal, this.cliQueueAbort.signal]) : this.cliQueueAbort.signal);
+        const discovery = await discoverClaudeCli(runtime, options.signal
+            ? AbortSignal.any([options.signal, this.cliQueueAbort.signal])
+            : this.cliQueueAbort.signal);
         if (discovery.updateRequired)
             throw new Error(claudeCliUpdateMessage(discovery.version));
         if (!discovery.available || !discovery.path)
@@ -759,28 +779,57 @@ export class ClaudeAdapter extends LlmAdapter {
         // too (nothing is judged in advance and a refused flag is handled at run time); only an aborted probe is retried.
         let probe = this.cliFlags.get(installed);
         if (!probe) {
-            probe = probeClaudeCliFlags(runtime, discovery.path, options.signal ? AbortSignal.any([options.signal, this.cliQueueAbort.signal]) : this.cliQueueAbort.signal);
+            probe = probeClaudeCliFlags(runtime, discovery.path, options.signal
+                ? AbortSignal.any([options.signal, this.cliQueueAbort.signal])
+                : this.cliQueueAbort.signal);
             this.cliFlags.set(installed, probe);
-            probe.catch(() => { if (this.cliFlags.get(installed) === probe)
-                this.cliFlags.delete(installed); });
+            probe.catch(() => {
+                if (this.cliFlags.get(installed) === probe)
+                    this.cliFlags.delete(installed);
+            });
         }
         const supported = await probe;
         const directory = await prepareClaudeCliAccountDirectory(loginId);
-        let prior = options.messages.flatMap((message) => {
-            const state = message.role === 'assistant' ? message.source?.replayState : undefined;
-            return state && typeof state === 'object' && 'response' in state && state.response && typeof state.response === 'object' && state.response.kind === 'waycraft-claude-cli-session'
-                ? [state.response.sessionId]
+        let prior = options.messages
+            .flatMap((message) => {
+            const state = message.role === 'assistant'
+                ? message.source?.replayState
+                : undefined;
+            return state &&
+                typeof state === 'object' &&
+                'response' in state &&
+                state.response &&
+                typeof state.response ===
+                    'object' &&
+                state.response.kind ===
+                    'waycraft-claude-cli-session'
+                ? [
+                    state.response
+                        .sessionId,
+                ]
                 : [];
-        }).filter((value) => typeof value === 'string').at(-1);
+        })
+            .filter((value) => typeof value === 'string')
+            .at(-1);
         if (fresh)
             prior = undefined;
-        const prompt = options.messages.filter((message) => message.role === 'user').at(-1);
+        const prompt = options.messages
+            .filter((message) => message.role === 'user')
+            .at(-1);
         if (!prompt)
             throw new Error('Claude CLI turn requires a user message');
-        const messageText = (message) => typeof message.content === 'string' ? message.content : message.content.map((part) => part.type === 'text' ? part.text : '').join('');
+        const messageText = (message) => typeof message.content === 'string'
+            ? message.content
+            : message.content
+                .map((part) => (part.type === 'text' ? part.text : ''))
+                .join('');
         // A new CLI session has no transcript. Preserve DSH's text history as a
         // single contextual prompt; a resumed session already owns that history.
-        const text = prior || options.messages.length === 1 ? messageText(prompt) : options.messages.map((message) => `[${message.role}]\n${messageText(message)}`).join('\n\n');
+        const text = prior || options.messages.length === 1
+            ? messageText(prompt)
+            : options.messages
+                .map((message) => `[${message.role}]\n${messageText(message)}`)
+                .join('\n\n');
         const permissionMode = permissionModeFor(options.messages);
         const promptsDisabled = approvalsDisabled(options.messages);
         const images = await this.promptImages(prompt, options.signal);
@@ -792,26 +841,76 @@ export class ClaudeAdapter extends LlmAdapter {
         const withDshTools = mcpTools !== undefined && agent !== undefined;
         if (!sideRequest && !withDshTools)
             this.options.onWarn?.('Claude CLI turn runs without DSH tools: the tool service or the session agent is unavailable');
+        // The managers decide what the run can use (ADR-0006), read fresh each turn. A side request is tool-less, so neither applies.
+        const managerMcp = sideRequest ? undefined : await readManagerMcp();
+        if (managerMcp) {
+            this.options.onManagerMcp?.(options.sessionId, managerMcp.state);
+            if (managerMcp.state === 'unreadable')
+                this.options.onWarn?.('The MCP manager configuration cannot be read; its servers are not available in this session');
+        }
+        const managerServers = managerMcp?.servers ?? {};
+        const withMcpConfig = withDshTools || Object.keys(managerServers).length > 0;
+        const skillSettings = sideRequest
+            ? undefined
+            : skillSettingsArgument(await readHiddenSkills());
         const parts = [
-            ...(options.system ? [{ flag: '--system-prompt', args: ['--system-prompt', options.system] }] : []),
+            ...(options.system
+                ? [
+                    {
+                        flag: '--system-prompt',
+                        args: ['--system-prompt', options.system],
+                    },
+                ]
+                : []),
             { flag: '--print', args: ['-p'] },
             { flag: '--input-format', args: ['--input-format', 'stream-json'] },
             { flag: '--output-format', args: ['--output-format', 'stream-json'] },
             { flag: '--verbose', args: ['--verbose'] },
             // Without partial events the translator reads the completed messages instead.
-            { flag: '--include-partial-messages', args: ['--include-partial-messages'], optional: true },
+            {
+                flag: '--include-partial-messages',
+                args: ['--include-partial-messages'],
+                optional: true,
+            },
             { flag: '--model', args: ['--model', options.model] },
             // Permission prompts, questions and plan reviews come back as control requests that become DSH dialogs.
             // An older CLI without these flags still runs: it then denies what needs a prompt instead of asking.
-            { flag: '--permission-mode', args: ['--permission-mode', permissionMode], optional: true },
-            { flag: '--permission-prompt-tool', args: ['--permission-prompt-tool', 'stdio'], optional: true },
+            {
+                flag: '--permission-mode',
+                args: ['--permission-mode', permissionMode],
+                optional: true,
+            },
+            {
+                flag: '--permission-prompt-tool',
+                args: ['--permission-prompt-tool', 'stdio'],
+                optional: true,
+            },
             // A side request must not fall back to the CLI's tools when the flag is unsupported, so there it is required.
-            { flag: '--tools', args: ['--tools', sideRequest ? '' : 'default'], optional: !sideRequest },
-            ...(sideRequest ? [{ flag: '--max-turns', args: ['--max-turns', '1'], optional: true }] : []),
+            {
+                flag: '--tools',
+                args: ['--tools', sideRequest ? '' : 'default'],
+                optional: !sideRequest,
+            },
+            ...(sideRequest
+                ? [{ flag: '--max-turns', args: ['--max-turns', '1'], optional: true }]
+                : []),
             // The run sees only the servers Waycraft hands it (ADR-0006): none for a side request, the DSH tools otherwise.
             { flag: '--strict-mcp-config', args: ['--strict-mcp-config'] },
-            ...(withDshTools ? [{ flag: '--mcp-config', args: ['--mcp-config', MCP_CONFIG_PLACEHOLDER] }] : []),
-            prior ? { flag: '--resume', args: ['--resume', prior] } : { flag: '--session-id', args: ['--session-id', randomUUID()] },
+            ...(withMcpConfig
+                ? [
+                    {
+                        flag: '--mcp-config',
+                        args: ['--mcp-config', MCP_CONFIG_PLACEHOLDER],
+                    },
+                ]
+                : []),
+            // The skills the Skill manager keeps from DSH are switched off for the run; required, or a hidden skill would show.
+            ...(skillSettings === undefined
+                ? []
+                : [{ flag: '--settings', args: ['--settings', skillSettings] }]),
+            prior
+                ? { flag: '--resume', args: ['--resume', prior] }
+                : { flag: '--session-id', args: ['--session-id', randomUUID()] },
         ];
         const plan = planCliArguments(parts, supported, refused);
         if (plan.missing.length)
@@ -819,18 +918,39 @@ export class ClaudeAdapter extends LlmAdapter {
         if (this.disposed)
             throw new Error('Claude adapter is disposed');
         const controller = new AbortController();
-        const caller = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+        const caller = options.signal
+            ? AbortSignal.any([options.signal, controller.signal])
+            : controller.signal;
         const watchdog = idleWatchdog(caller, this.options.streamIdleTimeoutMs);
         const signal = watchdog.signal;
         signal.throwIfAborted();
-        const mcpRun = withDshTools
-            ? await createClaudeCliMcpRun({ accountDirectory: directory, runtime: mcpTools, agent, signal })
+        const mcpRun = withMcpConfig
+            ? await createClaudeCliMcpRun({
+                accountDirectory: directory,
+                signal,
+                managerServers,
+                ...(withDshTools ? { dshTools: { runtime: mcpTools, agent } } : {}),
+            })
             : undefined;
-        const argv = [discovery.path, ...plan.argv.map((arg) => (arg === MCP_CONFIG_PLACEHOLDER ? mcpRun.configPath : arg))];
+        const argv = [
+            discovery.path,
+            ...plan.argv.map((arg) => arg === MCP_CONFIG_PLACEHOLDER ? mcpRun.configPath : arg),
+        ];
         let handle;
         try {
             // stdin stays open for the whole turn so control replies can be written; it is ended when the result arrives.
-            handle = runtime.spawn({ argv, cwd: directory, env: { CLAUDE_CONFIG_DIR: directory, ...SCRUBBED_ENV }, stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 64 * 1024 } }, graceMs: 1000, signal });
+            handle = runtime.spawn({
+                argv,
+                cwd: directory,
+                env: { CLAUDE_CONFIG_DIR: directory, ...SCRUBBED_ENV },
+                stdio: {
+                    stdin: 'pipe',
+                    stdout: 'pipe',
+                    stderr: { maxBytes: 64 * 1024 },
+                },
+                graceMs: 1000,
+                signal,
+            });
         }
         catch (error) {
             await mcpRun?.close();
@@ -847,18 +967,26 @@ export class ClaudeAdapter extends LlmAdapter {
                 return false;
             return stdin.write(line);
         };
-        const endStdin = () => { if (stdin && !stdin.destroyed && !stdin.writableEnded)
-            stdin.end(); };
+        const endStdin = () => {
+            if (stdin && !stdin.destroyed && !stdin.writableEnded)
+                stdin.end();
+        };
         // Dialogs the Owner has not answered yet, by request id. A dialog ends when answered, when the CLI withdraws it,
         // or when the turn ends or is aborted: its signal is the turn's signal, so none is left open.
         const dialogs = new Map();
         // A person thinking over a dialog is not an idle stream: keep the idle watchdog from ending the turn meanwhile.
-        const keepAlive = setInterval(() => { if (dialogs.size > 0)
-            watchdog.pulse(); }, 15_000);
+        const keepAlive = setInterval(() => {
+            if (dialogs.size > 0)
+                watchdog.pulse();
+        }, 15_000);
         keepAlive.unref();
         const handleControl = (frame) => {
             const id = typeof frame.request_id === 'string' ? frame.request_id : undefined;
-            const request = frame.request && typeof frame.request === 'object' && !Array.isArray(frame.request) ? frame.request : undefined;
+            const request = frame.request &&
+                typeof frame.request === 'object' &&
+                !Array.isArray(frame.request)
+                ? frame.request
+                : undefined;
             if (id === undefined || request === undefined)
                 return;
             if (request.subtype !== 'can_use_tool') {
@@ -869,24 +997,39 @@ export class ClaudeAdapter extends LlmAdapter {
             dialogs.set(id, dialog);
             const dialogSignal = AbortSignal.any([signal, dialog.signal]);
             // Without a tool_use_id the request id keeps two concurrent prompts for one tool apart.
-            const named = typeof request.tool_use_id === 'string' ? request : { ...request, tool_use_id: id };
-            void answerControlRequest(named, services, dialogSignal, promptsDisabled).then((result) => {
+            const named = typeof request.tool_use_id === 'string'
+                ? request
+                : { ...request, tool_use_id: id };
+            void answerControlRequest(named, services, dialogSignal, promptsDisabled)
+                .then((result) => {
                 // A dialog the CLI withdrew, or a turn that ended, has nobody left to read the answer.
                 if (!dialog.signal.aborted && !signal.aborted)
                     writeToCli(controlResponseLine(id, result));
-            }).catch(() => { }).finally(() => { dialogs.delete(id); });
+            })
+                .catch(() => { })
+                .finally(() => {
+                dialogs.delete(id);
+            });
         };
         let retryMissing = false;
         let retryWithoutFlag = false;
         let emitted = false;
-        let outputEvidence = "";
+        let outputEvidence = '';
         try {
             if (!handle.stdout)
                 throw new Error('Claude CLI subprocess omitted stdout pipe');
             // Without a writable stdin the prompt could not be sent and the CLI would wait on empty input.
             if (!stdin)
                 throw new Error('Claude CLI subprocess omitted stdin pipe');
-            writeToCli(JSON.stringify({ type: 'user', session_id: '', parent_tool_use_id: null, message: { role: 'user', content: images.length ? [{ type: 'text', text }, ...images] : text } }) + '\n');
+            writeToCli(JSON.stringify({
+                type: 'user',
+                session_id: '',
+                parent_tool_use_id: null,
+                message: {
+                    role: 'user',
+                    content: images.length ? [{ type: 'text', text }, ...images] : text,
+                },
+            }) + '\n');
             const stdout = handle.stdout;
             async function* observedLines() {
                 const decoder = new StringDecoder('utf8');
@@ -905,8 +1048,12 @@ export class ClaudeAdapter extends LlmAdapter {
                         try {
                             frame = JSON.parse(line);
                         }
-                        catch { /* not a JSON frame */ }
-                        if (frame?.type === 'result' && frame.is_error === true && typeof frame.result === 'string')
+                        catch {
+                            /* not a JSON frame */
+                        }
+                        if (frame?.type === 'result' &&
+                            frame.is_error === true &&
+                            typeof frame.result === 'string')
                             outputEvidence += frame.result + '\n';
                         // Control frames are answered here and never reach the translator.
                         if (frame?.type === 'control_request') {
@@ -943,7 +1090,9 @@ export class ClaudeAdapter extends LlmAdapter {
             // A refusal is the CLI's own startup complaint on stderr, before any output; never model text.
             const named = signal.aborted || emitted ? undefined : refusedFlag(stderr);
             // Only a flag this run actually passed can have been refused by it.
-            const rejected = named !== undefined && argv.includes(named) ? parts.find((part) => part.flag === named) : undefined;
+            const rejected = named !== undefined && argv.includes(named)
+                ? parts.find((part) => part.flag === named)
+                : undefined;
             if (rejected?.optional) {
                 // Remembered before the retry, so one flag is refused at most once and the retry cannot loop.
                 this.cliRefused.set(installed, new Set([...refused, rejected.flag]));
@@ -951,7 +1100,10 @@ export class ClaudeAdapter extends LlmAdapter {
             }
             else if (rejected)
                 throw new Error(claudeCliMissingFlagMessage(discovery.version, rejected.flag));
-            else if (prior && !fresh && !signal.aborted && /(?:no (?:conversation|session) found|(?:session|conversation).*(?:not found|does not exist|missing))/i.test(`${outputEvidence} ${stderr}`))
+            else if (prior &&
+                !fresh &&
+                !signal.aborted &&
+                /(?:no (?:conversation|session) found|(?:session|conversation).*(?:not found|does not exist|missing))/i.test(`${outputEvidence} ${stderr}`))
                 retryMissing = true;
             else
                 throw mapFetchFailure('Claude CLI', error, watchdog, options.signal);
@@ -978,11 +1130,21 @@ export class ClaudeAdapter extends LlmAdapter {
     }
     /** The images attached to the prompt, as the CLI's stream-json image blocks; files already arrive as text with a read-only path. */
     async promptImages(prompt, signal) {
-        if (typeof prompt.content === 'string' || !prompt.content.some((part) => part.type === 'image'))
+        if (typeof prompt.content === 'string' ||
+            !prompt.content.some((part) => part.type === 'image'))
             return [];
         const [resolved] = await resolveImages([prompt], this.options.resolveAttachments?.(), signal, CLAUDE_IMAGE_LIMIT);
         return (resolved?.content ?? []).flatMap((part) => part.type === 'image' && 'dataBase64' in part
-            ? [{ type: 'image', source: { type: 'base64', media_type: part.mediaType, data: part.dataBase64 } }]
+            ? [
+                {
+                    type: 'image',
+                    source: {
+                        type: 'base64',
+                        media_type: part.mediaType,
+                        data: part.dataBase64,
+                    },
+                },
+            ]
             : []);
     }
     async *streamCore(options, account) {

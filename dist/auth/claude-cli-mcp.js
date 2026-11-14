@@ -10,14 +10,58 @@ import { CLAUDE_CAPABILITIES } from '../provider-capabilities.js';
 const ALLOWED_TOOLS = new Set(CLAUDE_CAPABILITIES.cliTools.allowlist);
 /** Stands in the planned argv for the config path, which exists only once the run's endpoint is up. */
 export const MCP_CONFIG_PLACEHOLDER = '__WAYCRAFT_MCP_CONFIG__';
-/** Start the run-owned MCP endpoint and write its token-bearing config privately. */
+/** The name of the run's own server; no server of the MCP manager can take it. */
+export const DSH_TOOLS_SERVER = 'waycraft-dsh-tools';
+/** Write one private run directory holding `mcp.json`, created exclusively with mode 0600. */
+async function writeRunConfig(accountDirectory, servers) {
+    const directory = await mkdtemp(join(accountDirectory, '.waycraft-mcp-'));
+    const configPath = join(directory, 'mcp.json');
+    try {
+        await writeFile(configPath, JSON.stringify({ mcpServers: servers }), {
+            mode: 0o600,
+            flag: 'wx',
+        });
+    }
+    catch (error) {
+        await rm(directory, { recursive: true, force: true });
+        throw error;
+    }
+    return { directory, configPath };
+}
+/**
+ * The per-turn MCP configuration: the servers the MCP manager allows and, when the session has an agent and a tool
+ * service, the run-owned endpoint for DSH's tools. With no DSH tools there is no endpoint, only the private file.
+ * Whatever it holds (a server's environment or headers may carry secrets) is never logged; the file is removed when
+ * the turn ends or is aborted.
+ */
 export async function createClaudeCliMcpRun(input) {
+    const managerServers = input.managerServers ?? {};
+    if (!input.dshTools) {
+        input.signal.throwIfAborted();
+        const written = await writeRunConfig(input.accountDirectory, managerServers);
+        let removed;
+        const close = () => {
+            input.signal.removeEventListener('abort', abort);
+            removed ??= rm(written.directory, { recursive: true, force: true });
+            return removed;
+        };
+        const abort = () => {
+            void close().catch(() => { });
+        };
+        input.signal.addEventListener('abort', abort, { once: true });
+        if (input.signal.aborted) {
+            await close();
+            input.signal.throwIfAborted();
+        }
+        return { configPath: written.configPath, close };
+    }
+    const { runtime, agent } = input.dshTools;
     const token = randomBytes(32).toString('base64url');
-    const tools = input.runtime
-        .schemas(input.agent)
+    const tools = runtime
+        .schemas(agent)
         .filter(({ name }) => ALLOWED_TOOLS.has(name));
     const endpoint = createServer();
-    const server = new Server({ name: 'waycraft-dsh-tools', version: '1.0.0' }, { capabilities: { tools: {} } });
+    const server = new Server({ name: DSH_TOOLS_SERVER, version: '1.0.0' }, { capabilities: { tools: {} } });
     const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
     });
@@ -36,11 +80,11 @@ export async function createClaudeCliMcpRun(input) {
                 isError: true,
             };
         }
-        const result = await input.runtime.execute({
+        const result = await runtime.execute({
             callId: ToolCallId(randomUUID()),
             name,
             arguments: request.params.arguments ?? {},
-            agent: input.agent,
+            agent: agent,
             signal: input.signal,
         });
         return { content: result.content, isError: result.isError };
@@ -124,18 +168,21 @@ export async function createClaudeCliMcpRun(input) {
         if (!address || typeof address === 'string') {
             throw new Error('Claude CLI MCP endpoint failed to bind');
         }
-        configDirectory = await mkdtemp(join(input.accountDirectory, '.waycraft-mcp-'));
-        input.signal.throwIfAborted();
-        const configPath = join(configDirectory, 'mcp.json');
-        await writeFile(configPath, JSON.stringify({
-            mcpServers: {
-                'waycraft-dsh-tools': {
-                    type: 'http',
-                    url: `http://127.0.0.1:${address.port}/mcp`,
-                    headers: { Authorization: `Bearer ${token}` },
-                },
+        const written = await writeRunConfig(input.accountDirectory, {
+            ...managerServers,
+            [DSH_TOOLS_SERVER]: {
+                type: 'http',
+                url: `http://127.0.0.1:${address.port}/mcp`,
+                headers: { Authorization: `Bearer ${token}` },
             },
-        }), { mode: 0o600, flag: 'wx' });
+        });
+        configDirectory = written.directory;
+        // Abort may have completed close() before the asynchronous file creation returned its directory.
+        if (input.signal.aborted) {
+            await rm(written.directory, { recursive: true, force: true });
+            input.signal.throwIfAborted();
+        }
+        const configPath = written.configPath;
         return { configPath, close };
     }
     catch (error) {

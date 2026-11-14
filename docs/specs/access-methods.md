@@ -160,6 +160,7 @@ Recorded decisions: ADR-0005 (a subscription account carries its access method),
 - Each run is given exactly the MCP servers enabled in the MCP manager and the skill visibility set in the Skill manager, and the CLI's other configuration is excluded. For Claude this uses the CLI's strict MCP configuration and per-run skill overrides; both were confirmed against CLI 2.1.322 and the skills documentation.
 - The CLI, not DSH, connects to MCP servers in these sessions. The MCP manager's trust gate and connection test describe the configuration.
 - Skills inside a CLI plugin follow the plugin; the manage page says so.
+- Enabled MCP manager servers are the trusted, not-disabled ones whose reviewed configuration is unchanged; servers left out are listed on the manage page with a reason. The manager off or its file missing means no manager servers; an unreadable file means the same plus one notice per session. A server that references a `${credential:REF}` is left out until #211. Recorded in ADR-0006.
 - A per-provider switch, off by default, imports the CLI's native configuration into the Provider settings as a reviewed copy and lists the imported items read-only with their origin.
 - Hooks: the capability declaration says whether a provider supports them; hook failures are surfaced in the session; native hooks are listed read-only when imported. Defining hooks is left to a later Hook manager, which will follow ADR-0006.
 

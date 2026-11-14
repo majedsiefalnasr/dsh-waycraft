@@ -19,6 +19,7 @@ export const CLAUDE_CAPABILITIES = {
         allowlist: ['get_goal', 'create_goal', 'update_goal', 'web_search'],
         limitations: [
             'DSH subagents are unavailable in Claude CLI sessions; use Claude CLI native subagents.',
+            'MCP manager servers that use a ${credential:REF} are not available in Claude CLI sessions: the CLI cannot read DSH credentials and no secret is written to disk.',
         ],
     },
     accessMethods: [

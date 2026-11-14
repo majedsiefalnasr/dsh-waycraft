@@ -21,6 +21,7 @@ import { createApiProviders } from './api-providers.js';
 import { createCopilotCard } from './copilot-card.js';
 import { createClaudeCard } from './claude-card.js';
 import { createExtraUsageNotice } from './extra-usage-notice.js';
+import { createCliGovernanceNotice } from './cli-governance-notice.js';
 import { createAntigravityCard } from './antigravity-card.js';
 import { createZenCard } from './zen-card.js';
 import { createGrokCard } from './grok-card.js';
@@ -128,6 +129,11 @@ export function applySubscriptions(root: Context): void {
           React,
           createExtraUsageNotice(React, primitives, ClaudeCard),
           'extra-usage notice',
+        );
+        const CliGovernanceNotice = guarded(
+          React,
+          createCliGovernanceNotice(React, primitives),
+          'CLI governance notice',
         );
         const listeners = new Set<() => void>();
         let ApiProviders: any;
@@ -529,6 +535,23 @@ export function applySubscriptions(root: Context): void {
                     }),
                   },
                   ExtraUsageNotice,
+                ),
+              ),
+            );
+            add(() =>
+              ctx.slots.inject('conversation.composer.dock', () =>
+                ctx.slots.register(
+                  {
+                    name: 'conversation.composer.dock',
+                    id: 'waycraft-cli-governance-notice',
+                    order: 6,
+                    locale: NS,
+                    inject: (sessionId: string) => ({
+                      rpc: connection.rpc,
+                      sessionId,
+                    }),
+                  },
+                  CliGovernanceNotice,
                 ),
               ),
             );

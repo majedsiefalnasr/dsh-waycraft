@@ -1,3 +1,4 @@
+import { registerSkillVisibility } from './cli-governance.js';
 import type {
   PreToolDecision,
   ToolExecution,
@@ -1193,6 +1194,21 @@ export function apply(ctx: HostContext, config: Config = {}) {
       return operations;
     },
     'waycraft-skills pending state writes',
+  );
+  // Official CLI sessions hide the skills this manager keeps from DSH (ADR-0006). A name stays visible while any copy
+  // of it is still provided, so switching off one source is not a ban on a name another source supplies. Read-only.
+  ctx.effect(
+    () =>
+      registerSkillVisibility(async () => {
+        const { raw, scanDiagnostics } = await sharedScan();
+        const { groups } = finalize(raw, scanDiagnostics);
+        const hidden = new Set<string>();
+        for (const [skill, group] of groups)
+          if (!group.some((copy) => copy.eligible && copy.policyValid))
+            hidden.add(skill);
+        return hidden;
+      }),
+    'waycraft-skills CLI visibility',
   );
   /** Atomic, owner-only state replacement; callers hold the serialized `operations` slot. */
   const writeState = async (next: State) => {

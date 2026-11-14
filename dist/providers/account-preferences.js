@@ -48,7 +48,9 @@ export class AccountPreferencesAdapter extends LlmAdapter {
     }
     preference(account) {
         const accounts = this.options.settings.get(this.options.provider).accounts;
-        const legacy = account.startsWith('direct:') ? decodeURIComponent(account.slice('direct:'.length)) : account;
+        const legacy = account.startsWith('direct:')
+            ? decodeURIComponent(account.slice('direct:'.length))
+            : account;
         return accounts?.[account] ?? accounts?.[legacy];
     }
     async models(account, signal) {
@@ -89,7 +91,10 @@ export class AccountPreferencesAdapter extends LlmAdapter {
             if (model.startsWith(ACCOUNT_MODEL_PREFIX))
                 throw new LlmError('Independent entries cannot be pool members', 'NO_ADAPTER');
             const available = await withAbortSignal(this.options.accounts, signal);
-            const key = account === undefined ? available[0]?.key : available.find((entry) => entry.key === account || entry.key === `direct:${encodeURIComponent(account)}`)?.key;
+            const key = account === undefined
+                ? available[0]?.key
+                : available.find((entry) => entry.key === account ||
+                    entry.key === `direct:${encodeURIComponent(account)}`)?.key;
             if (!key)
                 throw new LlmError('No account available', 'NO_ADAPTER');
             if ((await this.options.accounts()).some((entry) => entry.key === key && entry.accessMethod === 'official-cli'))
@@ -177,12 +182,19 @@ export class AccountPreferencesAdapter extends LlmAdapter {
         const independent = parseAccountModelId(id);
         const pool = this.options.pool();
         if (!independent &&
-            (await withAbortSignal(this.options.accounts, signal))[0]?.accessMethod !== 'official-cli' &&
+            (await withAbortSignal(this.options.accounts, signal))[0]
+                ?.accessMethod !== 'official-cli' &&
             pool &&
             (await withAbortSignal(() => pool.owns(this.options.provider, id), signal))) {
             const prepared = await pool.prepareCall(provider, id, signal);
             const owner = this;
-            return { ...prepared, model: this.present(id, prepared.model), async *stream(options) { yield* owner.stream(options); } };
+            return {
+                ...prepared,
+                model: this.present(id, prepared.model),
+                async *stream(options) {
+                    yield* owner.stream(options);
+                },
+            };
         }
         const account = independent?.account ?? (await this.fallback(id, signal));
         const model = independent?.model ?? id;
@@ -222,13 +234,25 @@ export class AccountPreferencesAdapter extends LlmAdapter {
         };
     }
     boundAccount(options) {
-        return options.messages.flatMap((message) => {
-            const state = message.role === 'assistant' && message.source?.provider === this.options.provider ? message.source?.replayState : undefined;
+        return options.messages
+            .flatMap((message) => {
+            const state = message.role === 'assistant' &&
+                message.source?.provider === this.options.provider
+                ? message.source?.replayState
+                : undefined;
             if (!state || typeof state !== 'object' || !('response' in state))
                 return [];
             const response = state.response;
-            return response && typeof response === 'object' && 'kind' in response && response.kind === 'subscriptions-account-replay' && 'account' in response && typeof response.account === 'string' ? [response.account] : [];
-        }).at(-1);
+            return response &&
+                typeof response === 'object' &&
+                'kind' in response &&
+                response.kind === 'subscriptions-account-replay' &&
+                'account' in response &&
+                typeof response.account === 'string'
+                ? [response.account]
+                : [];
+        })
+            .at(-1);
     }
     async *stream(options) {
         const independent = parseAccountModelId(options.model);
@@ -245,7 +269,8 @@ export class AccountPreferencesAdapter extends LlmAdapter {
             return;
         }
         const pool = this.options.pool();
-        if ((await withAbortSignal(this.options.accounts, options.signal))[0]?.accessMethod !== 'official-cli' &&
+        if ((await withAbortSignal(this.options.accounts, options.signal))[0]
+            ?.accessMethod !== 'official-cli' &&
             pool &&
             (await withAbortSignal(() => pool.owns(this.options.provider, options.model), options.signal))) {
             yield* pool.stream(options);

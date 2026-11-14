@@ -1593,6 +1593,7 @@ const MEDIA_SURFACES = [
   .map((key) => `waycraft-toolview-${key}`)
   .sort();
 const SURFACES = [
+  'waycraft-cli-governance-notice',
   'waycraft-extra-usage-notice',
   'waycraft-subscription-speed',
   'waycraft-subscription-usage',
@@ -1617,6 +1618,10 @@ test('composer surfaces register with waycraft ids while present and withdraw wh
   assert.equal(
     page.live.get('waycraft-extra-usage-notice').options.locale,
     'waycraft.subscriptions',
+  );
+  assert.equal(
+    page.live.get('waycraft-cli-governance-notice').options.name,
+    'conversation.composer.dock',
   );
   assert.equal(page.live.get('waycraft-subscription-speed').options.order, 0);
   assert.equal(page.live.get('waycraft-subscription-usage').options.order, 10);
@@ -1688,6 +1693,7 @@ test('a composer surface that fails to register does not affect the section or t
     assert.deepEqual(
       page.surfaces,
       [
+        'waycraft-cli-governance-notice',
         'waycraft-extra-usage-notice',
         'waycraft-subscription-usage',
         ...MEDIA_SURFACES,

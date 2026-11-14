@@ -104,8 +104,14 @@ export async function startHarness(t, services = {}, options = {}) {
   };
   const adapters = {};
   const cleanups = [];
+  const warnings = [];
+  const routes = new Map();
   const ctx = {
-    logger: { warn() {} },
+    logger: {
+      warn(message) {
+        warnings.push(String(message));
+      },
+    },
     llm: {
       registerAdapter(ids, adapter) {
         adapters[ids[0]] = adapter;
@@ -113,16 +119,29 @@ export async function startHarness(t, services = {}, options = {}) {
       },
     },
     get(name) {
+      if (name === 'connection')
+        return {
+          fetch: {
+            register(route) {
+              routes.set(route.path, route);
+              return () => routes.delete(route.path);
+            },
+          },
+        };
       if (name === 'subprocess') return runtime;
       if (name === 'agents')
         return { get: (id) => ({ session: { id, header: {} } }) };
-      return name === 'tools' ? services[name] ?? defaultTools : services[name];
+      return name === 'tools'
+        ? (services[name] ?? defaultTools)
+        : services[name];
     },
     effect(fn) {
       const cleanup = fn();
       if (cleanup) cleanups.push(cleanup);
     },
-    inject() {},
+    inject(names, fn) {
+      if ([].concat(names).includes('connection')) fn(ctx);
+    },
   };
   apply(
     ctx,
@@ -173,7 +192,40 @@ export async function startHarness(t, services = {}, options = {}) {
       return [];
     }
   };
-  return { run, stream, records, children, root, directory: owned };
+  /** Call one of the component's RPC routes the way the browser half does; answers the route's `result`. */
+  const call = async (endpoint, payload = {}) => {
+    const method = `waycraft-subscriptions.${endpoint}`;
+    const response = await routes.get(`/api/${method}`).fetch(
+      new Request(`http://localhost/api/${method}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'client-request',
+          rpcId: 'fixture',
+          method,
+          payload,
+        }),
+      }),
+    );
+    return (await response.json()).result;
+  };
+  const status = async () =>
+    (await call('status', { provider: 'claude' })).value.providers;
+  const notice = async (sessionId) =>
+    (await call('cliGovernanceNotice', { provider: 'claude', sessionId }))
+      .value;
+  return {
+    run,
+    stream,
+    records,
+    children,
+    root,
+    directory: owned,
+    warnings,
+    call,
+    status,
+    notice,
+  };
 }
 
 /** The visible text of a chunk list, in stream order. */
