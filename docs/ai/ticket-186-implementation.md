@@ -1,6 +1,6 @@
 # Ticket 186 implementation
 
-Status: implementation and automated verification complete; Owner authorized integration and closure. Independent review found one cancellation cleanup race, now fixed and regression-tested.
+Status: complete. Implementation `1b2fe35` merged into `feat/179-access-methods` as `83a46a3`; GitHub #186 is CLOSED with all six acceptance checkboxes checked and evidence linked. Independent review found one cancellation cleanup race, now fixed and regression-tested. No push, main merge or release.
 
 ## Work contract
 

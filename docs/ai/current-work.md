@@ -2,7 +2,7 @@
 
 ## Ticket #186 — 2026-11-14
 
-Implementation and verification complete on `feat/186-cli-skill-mcp-governance`, based on `8b57465` of `feat/179-access-methods`. Owner authorized verification/closure and mechanical formatting of existing files. Quality (format, lint, three typecheck projects), build, 1574 tests, and fresh-build comparison pass. Independent Standards/Spec review found one cancellation cleanup race, fixed and regression-tested. Follow-up #211 under #179 tracks credential resolution and is not implemented. Integration and tracker closure authorized next; no installed/live CLI verification, push, main merge or release. See [evidence](ticket-186-implementation.md).
+Implementation and verification complete on `feat/186-cli-skill-mcp-governance`, based on `8b57465` of `feat/179-access-methods`. Owner authorized verification/closure and mechanical formatting of existing files. Quality (format, lint, three typecheck projects), build, 1574 tests, and fresh-build comparison pass. Independent Standards/Spec review found one cancellation cleanup race, fixed and regression-tested. Follow-up #211 under #179 tracks credential resolution and is not implemented. Implementation commit `1b2fe35` merged into the spec branch as `83a46a3`. GitHub #186 is CLOSED and all six acceptance checkboxes are checked with verification evidence. This closure record is committed on the ticket branch and integrated afterwards. No installed/live CLI verification, push, main merge or release. Stop: no next ticket authorized. See [evidence](ticket-186-implementation.md).
 
 ## Ticket #185 — 2026-11-13 (completed)
 
